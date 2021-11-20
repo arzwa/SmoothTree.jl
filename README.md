@@ -1,2 +1,0 @@
-# SmoothTree.jl
-# SmoothTree.jl
