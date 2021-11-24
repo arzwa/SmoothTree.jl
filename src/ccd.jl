@@ -6,6 +6,8 @@
 # possible splits, so that vector based representations are probably
 # optimal.
 
+# Better use DefaultDict, so that, a.o. logpdf does not break when a
+# clade is not present in a tree (but just return -Inf)
 mutable struct CCD{T,V}
     leaves::Vector{String}
     lmap  ::Dict{String,T}
@@ -38,6 +40,7 @@ ccp(ccd::CCD, γ, δ) = ccd.smap[γ][δ] / ccd.cmap[γ]
 # uniform weights for a given vector of elements 
 uweights(xs) = fill(1/length(xs), length(xs))
 
+# from a vector of trees
 function CCD(trees; weights=uweights(trees), T=UInt16)
     ccd = initccd(trees[1], T)
     for (tree, weight) in zip(trees, weights)
@@ -45,6 +48,13 @@ function CCD(trees; weights=uweights(trees), T=UInt16)
     end
     return ccd
 end
+
+# from a proportionmap
+CCD(trees::Dict; T=UInt16) = 
+    CCD(collect(keys(trees)), weights=collect(values(trees)), T=T)
+
+# For a single tree
+CCD(tree::Node; T=UInt16) = CCD([tree], T=T)
 
 function initccd(tree, T=UInt16)
     lmap = leafclades(tree, T)
@@ -109,19 +119,40 @@ end
 # draw a tree from the ccd
 function randtree(ccd::CCD{T}) where T
     root = maximum(keys(ccd.cmap))
-    clades = T[]
-    function randwalk(clade)
-        push!(clades, clade)
-        isleafclade(clade) && return
-        splits = collect(ccd.smap[clade])
-        splt = sample(1:length(splits), Weights(last.(splits)))
-        left = first(splits[splt])
-        rght = clade - left
-        randwalk(left)
-        randwalk(rght)
-    end
-    randwalk(root)
+    return _randwalk(T[], root, ccd)
+end
+
+function _randwalk(clades, clade, ccd)
+    push!(clades, clade)
+    isleafclade(clade) && return clades
+    splits = collect(ccd.smap[clade])
+    splt = sample(1:length(splits), Weights(last.(splits)))
+    left = first(splits[splt])
+    rght = clade - left
+    clades = _randwalk(clades, left, ccd)
+    clades = _randwalk(clades, rght, ccd)
     return clades
+end
+
+# compute the probability mass of a single tree under the CCD
+function logpdf(ccd::CCD, tree)
+    ℓ, _ = _lwalk(tree, ccd, 0.)
+    return ℓ
+end
+
+function _lwalk(n::Node, ccd, ℓ)
+    isleaf(n) && return ℓ, ccd.lmap[name(n)]
+    ℓ, left = _lwalk(n[1], ccd, ℓ) 
+    ℓ, rght = _lwalk(n[2], ccd, ℓ)
+    δ = left < rght ? left : rght
+    γ = left + rght
+    (!haskey(ccd.cmap, γ) || !haskey(ccd.smap[γ], δ)) && return -Inf, γ
+    ℓ += log(ccd.smap[γ][δ]) - log(ccd.cmap[γ])
+    return ℓ, γ
+end
+
+function logpdf(ccd::CCD, trees::AbstractVector)
+    mapreduce(t->logpdf(ccd, t), +, trees)
 end
 
 # get clades as bitstrings

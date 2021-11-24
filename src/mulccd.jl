@@ -2,7 +2,6 @@
 # trees with missing genes. This is more or less a simplified version
 # of ALE, but with the ultimate goal to infer a species tree, more or
 # less like a supertree method?
-_spname(x) = string(split(x, "_")[1])
 
 struct TreeData{T,V}
     ccd::CCD{T,V}
@@ -20,7 +19,7 @@ end
 
 Base.show(io::IO, X::TreeData) = write(io, "TreeData($(X.ccd))")
 
-logpdf(model, X::Vector) = mapreduce(x->logpdf(model, x), +, X)
+logpdf(model, X::Vector{<:TreeData}) = mapreduce(x->logpdf(model, x), +, X)
 
 function logpdf(model, X::TreeData)
     @unpack nv, θ, S = model  
