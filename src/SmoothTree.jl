@@ -5,10 +5,11 @@ import Distributions: logpdf
 export CCD
 
 include("ccd.jl")
-include("mulccd.jl")
-include("mscsim.jl")
-include("mscccd.jl")
-include("ep-abc-msc.jl")
+include("msc.jl")
+include("rearrangement.jl")
+include("epabc.jl")
+#include("mulccd.jl")
+#include("ep-abc-msc.jl")
 
 # assumed throughout
 _spname(x::String) = string(split(x, "_")[1])

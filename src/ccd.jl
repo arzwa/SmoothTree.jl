@@ -1,4 +1,6 @@
-
+# Arthur Zwaenepoel 2021
+# Currently only thought about rooted trees
+#
 # Depending on our application, different representations are
 # desirable. To query probabilities for arbitrary tree topologies,
 # we'd need a lot of dictionary-like lookup utilities, while in ALE we
@@ -134,8 +136,18 @@ function _randwalk(clades, clade, ccd)
     return clades
 end
 
+# compute the probability of a set of splits
+function logpdf(ccd::CCD, splits::Vector{T}) where T<:Tuple
+    ℓ = 0.
+    for (γ, δ) in splits
+        (!haskey(ccd.cmap, γ) || !haskey(ccd.smap[γ], δ)) && return -Inf
+        ℓ += log(ccd.smap[γ][δ]) - log(ccd.cmap[γ])
+    end
+    return ℓ
+end
+
 # compute the probability mass of a single tree under the CCD
-function logpdf(ccd::CCD, tree)
+function logpdf(ccd::CCD, tree::Node)
     ℓ, _ = _lwalk(tree, ccd, 0.)
     return ℓ
 end
@@ -199,3 +211,4 @@ function getclades(tree)
     walk(tree)
     return clades
 end
+

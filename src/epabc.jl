@@ -19,18 +19,6 @@ mutable struct GaussianEPABC
     Z        # current marginal likelihood
 end
 
-const DefaultNode = Node{Int64,NewickData{Float64,String}}
-
-function initdict(model::MSC, y)
-    spleaves = Dict(name(n)=>id(n) for n in model.l)
-    init = Dict(v => DefaultNode[] for v in values(spleaves))
-    for (i,gene) in enumerate(y.leaves)
-        species = spleaves[_spname(gene)]
-        push!(init[species], Node(i, n=gene))
-    end
-    return init
-end
-    
 function ep_iteration(alg::GaussianEPABC, i)
     @unpack S, M, N, μ, Σ, tol, data = alg
     θ = rand(MvNormal(μ, Σ), M)
@@ -87,9 +75,9 @@ function ep_iteration!(alg::_UvNormalEPABC, i)
     @unpack X, μ, V, M, ϵ, model = alg
     θ = rand(Normal(μ, √V), M)
     x = X[i]
-    init = initdict(model, x)
+    model_i = model(x)
     sims = map(1:M) do m
-        setdistance!(model.S, exp(θ[m]))
+        setdistance!(model_i.tree, exp(θ[m]))
         tree = randtree(model, copy(init))
         exp(logpdf(x, tree))
         #trees = randtree(model, copy(init), 100)

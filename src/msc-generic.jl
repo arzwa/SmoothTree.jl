@@ -72,10 +72,21 @@ function censored_coal!(uncoal, snode, i)
     return i
 end
 
-# Would be cool to simulate a CCD directly
+# for with CCDs
+const DefaultNode = Node{Int64,NewickData{Float64,String}}
 
-# S = ((smo:10.0,(((gge:9.0,iov:6.0):7.0,(xtz:11.0,dzq:9.0):7.0):23.0,sgt:8.0):2.0):7.0,jvs:7.0);
-# julia> @btime SmoothTree.mscsim(S)
-#  2.645 μs (80 allocations: 5.74 KiB)
-#  ((smo,(sgt,((dzq,xtz),(gge,iov)))),jvs);
+function initdict(model::MSC, y::CCD)
+    spleaves = Dict(name(n)=>id(n) for n in model.l)
+    init = Dict(v => DefaultNode[] for v in values(spleaves))
+    for (i,gene) in enumerate(y.leaves)
+        species = spleaves[_spname(gene)]
+        push!(init[species], Node(i, n=gene))
+    end
+    return init
+end
+   
+
+ S = nw"((smo:1,(((gge:1,iov:1):1,(xtz:1,dzq:1):1):1,sgt:1):1):1,jvs:1);"
+ julia> @btime SmoothTree.randtree(m);
+  1.939 μs (66 allocations: 4.56 KiB)
 
