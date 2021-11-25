@@ -1,10 +1,10 @@
-struct MSC{V}
+struct MSC1{V}
     S::V
     o::Vector{V}
     l::Vector{V}
 end
 
-MSC(tree) = MSC(tree, postwalk(tree), getleaves(tree))
+MSC1(tree) = MSC1(tree, postwalk(tree), getleaves(tree))
 
 function setdistance!(S, θ::Vector)
     for (i,n) in enumerate(postwalk(S))
@@ -20,19 +20,19 @@ function setdistance!(S, θ::Number)
     end
 end
 
-function randtree(model::MSC) 
+function randtree(model::MSC1) 
     init = Dict(id(n)=>[Node(i, n=name(n))] for (i,n) in enumerate(model.l))
     randtree(model, init)
 end
 
-function randtree(model::MSC, n::Int) 
+function randtree(model::MSC1, n::Int) 
     init = Dict(id(n)=>[Node(i, n=name(n))] for (i,n) in enumerate(model.l))
     randtree(model, init, n)
 end
 
-randtree(model::MSC, init::Dict, n::Int) = map(i->randtree(model, copy(init)), 1:n)
+randtree(model::MSC1, init::Dict, n::Int) = map(i->randtree(model, copy(init)), 1:n)
 
-function randtree(model::MSC, init::Dict)
+function randtree(model::MSC1, init::Dict)
     i = length(init) + 1
     for snode in model.o[1:end-1]
         i = censored_coal!(init, snode, i)
@@ -71,22 +71,4 @@ function censored_coal!(uncoal, snode, i)
     uncoal[p] = haskey(uncoal, p) ? vcat(uncoal[p], potential) : potential
     return i
 end
-
-# for with CCDs
-const DefaultNode = Node{Int64,NewickData{Float64,String}}
-
-function initdict(model::MSC, y::CCD)
-    spleaves = Dict(name(n)=>id(n) for n in model.l)
-    init = Dict(v => DefaultNode[] for v in values(spleaves))
-    for (i,gene) in enumerate(y.leaves)
-        species = spleaves[_spname(gene)]
-        push!(init[species], Node(i, n=gene))
-    end
-    return init
-end
-   
-
- S = nw"((smo:1,(((gge:1,iov:1):1,(xtz:1,dzq:1):1):1,sgt:1):1):1,jvs:1);"
- julia> @btime SmoothTree.randtree(m);
-  1.939 μs (66 allocations: 4.56 KiB)
 

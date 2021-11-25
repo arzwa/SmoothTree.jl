@@ -2,34 +2,34 @@ using Pkg; Pkg.activate(@__DIR__)
 using SmoothTree, Test, NewickTree, Serialization, StatsBase, Distributions
 using LinearAlgebra
 
-
 # EP tests
 # First generate a simulated data set 
 # -----------------------------------
 # 1. the univariate model
 S = nw"((smo,(((gge,iov),(xtz,dzq)),sgt)),jvs);"
-SmoothTree.setdistance!(S, exp(0.5))
+SmoothTree.setdistance!(S, exp(.75))
 model = SmoothTree.MSC(S)
 
-# 2. the data
+# 2. simulate data
 # we do not include tree uncertainty here...
-trees = SmoothTree.randtree(model, 1000)
+data = [CCD(model, SmoothTree.randsplits(model)) for i=1:500]
 
+#mm = MSC1(S)
+#trees = randtree(mm, 1000)
 # add noise, note though that this does not accurately reflect noisy
 # trees I guess... would be better to sample from a mixture of NNI
 # trees with random weights?
-trees = map(trees) do tree
-    td = SmoothTree.RootedNNI(tree, Geometric(0.9))
-    proportionmap(SmoothTree.randtree(td, 100))
-end
-
-data = CCD.(trees)
+#trees = map(trees) do tree
+#    td = SmoothTree.RootedNNI(tree, Geometric(0.9))
+#    proportionmap(SmoothTree.randtree(td, 100))
+#end
+#data = CCD.(trees)
 
 # EP inference
 # ------------
 alg = SmoothTree._UvNormalEPABC(
-    SmoothTree.MSC(S), data, 
-    0., 2., NaN, 20000, 1.)
+    SmoothTree.MSC(deepcopy(S)), data, 
+    0., 2., NaN, 10000, 1.)
 
 res = map(1:length(data)) do i
     d = SmoothTree.ep_iteration!(alg, i)

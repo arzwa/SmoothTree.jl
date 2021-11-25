@@ -76,11 +76,40 @@ function _censoredcoalsplits!(splits, t, lineages)
     return lineages, splits
 end
 
+# construct a CCD from a set of splits from a single simulation
+# FIXME: this does not work in general... only for a single simulation
+function CCD(model, splits::Vector{Tuple{T,T}}) where T
+    leaves = collect(keys(model.leafindex))
+    lmap = Dict{String,T}()
+    # we make sure it works when there are multiple leaves for a
+    # species
+    for (k,v) in model.leafindex
+        for (i,g) in enumerate(model.init[v])
+            gname = "$(k)_$i"
+            lmap[gname] = g
+        end
+    end
+    cmap = Dict(γ=>1. for γ in first.(splits))
+    smap = Dict(γ=>Dict(δ=>1.) for (γ, δ) in splits)
+    CCD(leaves, lmap, cmap, smap, 1)
+end
+
 # utilities for setting species tree branch lengths
+n_internal(S) = length(postwalk(S)) - length(getleaves(S)) - 1
+
 function setdistance!(S, θ::Vector)
     for (i,n) in enumerate(postwalk(S))
         isroot(n) && return
         n.data.distance = θ[i]
+    end
+end
+
+function setdistance_internal!(S, θ::Vector)
+    i = 1
+    for n in postwalk(S)
+        (isroot(n) || isleaf(n)) && continue
+        n.data.distance = θ[i]
+        i += 1
     end
 end
 
