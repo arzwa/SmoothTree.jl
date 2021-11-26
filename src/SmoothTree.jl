@@ -1,6 +1,7 @@
 module SmoothTree
 
 using NewickTree, StatsBase, Parameters, Random, StatsFuns, Distributions
+using DataStructures
 import Distributions: logpdf
 export CCD
 

@@ -8,8 +8,13 @@
 # possible splits, so that vector based representations are probably
 # optimal.
 
-# Better use DefaultDict, so that, a.o. logpdf does not break when a
-# clade is not present in a tree (but just return -Inf)
+# TODO: Better use DefaultDict, so that, a.o. logpdf does not break
+# when a clade is not present in a tree (but just return -Inf)
+"""
+    CCD
+
+A conditional clade distribution object.
+"""
 mutable struct CCD{T,V}
     leaves::Vector{String}
     lmap  ::Dict{String,T}
@@ -58,7 +63,7 @@ CCD(trees::Dict; T=UInt16) =
 # For a single tree
 CCD(tree::Node; T=UInt16) = CCD([tree], T=T)
 
-function initccd(tree, T=UInt16)
+function initccd(tree::Node, T=UInt16)
     lmap = leafclades(tree, T)
     cmap = Dict{T,Float64}(l=>0. for (_,l) in lmap)
     smap = Dict{T,Dict{T,Float64}}()
@@ -118,22 +123,22 @@ function rootall!(trees, leaf)
     map(f, trees)
 end
 
-# draw a tree from the ccd
+# draw a tree from the ccd, simulates a tree as a set of splits
 function randtree(ccd::CCD{T}) where T
     root = maximum(keys(ccd.cmap))
-    return _randwalk(T[], root, ccd)
+    return _randwalk(Tuple{T,T}[], root, ccd)
 end
 
-function _randwalk(clades, clade, ccd)
-    push!(clades, clade)
-    isleafclade(clade) && return clades
-    splits = collect(ccd.smap[clade])
-    splt = sample(1:length(splits), Weights(last.(splits)))
-    left = first(splits[splt])
+function _randwalk(splits, clade, ccd)
+    isleafclade(clade) && return splits
+    csplits = collect(ccd.smap[clade])
+    splt = sample(1:length(csplits), Weights(last.(csplits)))
+    left = first(csplits[splt])
     rght = clade - left
-    clades = _randwalk(clades, left, ccd)
-    clades = _randwalk(clades, rght, ccd)
-    return clades
+    push!(splits, (clade, left))
+    splits = _randwalk(splits, left, ccd)
+    splits = _randwalk(splits, rght, ccd)
+    return splits
 end
 
 # compute the probability of a set of splits
@@ -211,4 +216,21 @@ function getclades(tree)
     walk(tree)
     return clades
 end
+
+# compute the KL-divergence between two CCDs
+function kldiv(x::CCD, y::CCD)  # d(x||y) = ∫p(x)log(p(x)/q(x))dx
+    d = 0. 
+    for (γ, pγ) in x.cmap
+        isleafclade(γ) && continue
+        !haskey(y.cmap, γ) && return Inf
+        for (δ, pδ) in x.smap[γ]
+            !haskey(y.smap[γ], δ) && return Inf
+            p = pδ/pγ
+            q = y.smap[γ][δ]/y.cmap[γ]
+            d += p* log(p/q)
+        end
+    end
+    return d
+end
+
 

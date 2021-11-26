@@ -13,12 +13,19 @@
 # data structure in the way we usually do, and gain efficiency that
 # way.
 
+"""
+    MSC(species_tree)
+ 
+Multi-species coalescent distribution over gene trees for a given
+species tree with branch lengths in coalescent units.
+"""
 struct MSC{T,V,Ψ}
     tree     ::Ψ
     leafindex::Dict{String,V}
     init     ::Dict{V,Vector{T}}
 end
 
+# construct MSC object
 function MSC(tree) 
     tree.data.distance = Inf  # always
     leaves = getleaves(tree)
@@ -41,6 +48,9 @@ function initmsc(model, ccd::CCD{T}) where T
     end
     return d
 end
+
+# do n `randsplits` simulations
+randsplits(model::MSC, n) = map(_->randsplits(model), 1:n)
 
 # generate a tree from the MSC model, in the form of a set of splits.
 function randsplits(model::MSC{T}) where T
@@ -76,22 +86,40 @@ function _censoredcoalsplits!(splits, t, lineages)
     return lineages, splits
 end
 
-# construct a CCD from a set of splits from a single simulation
-# FIXME: this does not work in general... only for a single simulation
-function CCD(model, splits::Vector{Tuple{T,T}}) where T
+# define an alias
+const Splits{T} = Vector{Tuple{T,T}}
+
+# construct a CCD object from a set of splits
+function CCD(model, splits::Vector{Splits{T}}; weights=uweights(splits)) where T
+    ccd = initccd(model, splits[1])
+    for (s, weight) in zip(splits, weights)
+        addsplits!(ccd, s, weight)
+    end
+    return ccd
+end
+
+function initccd(model::MSC, splits::Splits{T}) where T
     leaves = collect(keys(model.leafindex))
     lmap = Dict{String,T}()
-    # we make sure it works when there are multiple leaves for a
-    # species
+    # we make sure it works when a species has multiple leaves
     for (k,v) in model.leafindex
         for (i,g) in enumerate(model.init[v])
             gname = "$(k)_$i"
             lmap[gname] = g
         end
     end
-    cmap = Dict(γ=>1. for γ in first.(splits))
-    smap = Dict(γ=>Dict(δ=>1.) for (γ, δ) in splits)
-    CCD(leaves, lmap, cmap, smap, 1)
+    cmap = Dict(l=>0. for (_,l) in lmap)
+    smap = Dict{T,Dict{T,Float64}}()
+    CCD(leaves, lmap, cmap, smap, 0)
+end
+
+function addsplits!(ccd, s, w=1.)
+    for (γ, δ) in s
+        _update!(ccd.cmap, ccd.smap, γ, δ)
+        ccd.cmap[γ] += w
+        ccd.smap[γ][δ] += w
+    end
+    ccd.total += 1
 end
 
 # utilities for setting species tree branch lengths
