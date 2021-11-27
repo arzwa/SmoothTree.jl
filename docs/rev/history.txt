@@ -1,0 +1,58 @@
+sptree = readTrees("sptree-01.nw")[1]
+species = sptree.taxa()
+sptree
+psi ~ dnUniformTimeTree(rootAge=1.0, taxa=species)
+psi.setValue(sptree)
+psi
+psi ~ dnUniformTimeTree(rootAge=1.0, taxa=species)
+psi
+dnConstrainedTopology
+dnConstrainedTopology(dnUniformTimeTree(rootAge=1., taxa=species),
+backbone=species)
+dnConstrainedTopology(dnUniformTimeTree(rootAge=1., taxa=species),
+backbone=sptree)
+dnConstrainedTopology(dnUniformTimeTree(rootAge=1., taxa=species),dnConstrainedTopology(dnUniformTimeTree(rootAge=1., taxa=species),
+backbone=sptree)
+sptree = readTrees("sptree-01.nw")[1]
+species = sptree.taxa()
+dnConstrainedTopology(dnUniformTimeTree(rootAge=1., taxa=species),
+backbone=sptree)
+psi ~ dnConstrainedTopology(dnUniformTimeTree(rootAge=1., taxa=species),
+backbone=sptree)
+psi ~ dnConstrainedTopology(dnUniformTimeTree(
+    rootAge=1., taxa=species),backbone=sptree)
+psi ~ dnUniformTimeTree(rootAge=1.0, taxa=species)
+psi
+dnBDP
+tree_dist = dnBDP(0.20, 0.15, 1, 1.)
+tree_dist = dnBDP(0.20, 0.15, 1., 1.)
+psi ~ dnUniformTimeTree(rootAge=1.0, taxa=species)
+tree_dist = dnBDP(0.20, 0.15, 1., 1.)
+tree_dist = dnBDP(0.20, 0.15)
+tree_dist ~ dnBDP(0.20, 0.15)
+psi ~ dnUniformTimeTree(rootAge=1.0, taxa=species)
+sptree = readTrees("sptree-01.nw")[1]
+species = sptree.taxa()
+psi ~ dnUniformTimeTree(rootAge=1.0, taxa=species)
+psi
+psi ~ dnUniformTimeTree(rootAge=1.0, taxa=species)
+psi
+pop_size_shape <- 2.0
+mean_pop_size <- 1.0
+pop_size_rate := pop_size_shape / mean_pop_size
+population_size ~ dnGamma(shape = pop_size_shape, rate = pop_size_rate)
+population_size
+pop_size_shape <- 2.0
+mean_pop_size <- 1.0
+pop_size_rate := pop_size_shape / mean_pop_size
+population_size ~ dnGamma(shape=pop_size_shape, rate=pop_size_rate)
+population_size
+pop_size_shape <- 2.0
+mean_pop_size <- 1.0
+pop_size_rate := pop_size_shape / mean_pop_size
+population_size ~ dnGamma(shape=pop_size_shape, rate=pop_size_rate)
+population_size
+gene_tree ~ dnMultiSpeciesCoalescent(speciesTree = psi,
+        Ne = population_size)
+gene_tree ~ dnMultiSpeciesCoalescent(psi, population_size, species)
+gene_tree

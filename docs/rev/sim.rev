@@ -1,0 +1,35 @@
+
+sptree = readTrees("sptree-01.nw")[1]
+species = sptree.taxa()
+
+psi ~ dnUniformTimeTree(rootAge=1.0, taxa=species)
+
+pop_size_shape <- 2.0
+mean_pop_size <- 1.0
+pop_size_rate := pop_size_shape / mean_pop_size
+population_size ~ dnGamma(shape=pop_size_shape, rate=pop_size_rate)
+
+gene_tree ~ dnMultiSpeciesCoalescent(psi, population_size, species)
+
+clock_rate = 1.0
+Q = fnJC(num_states = 4)
+
+seq_ctmc ~ dnPhyloCTMC(
+        tree=gene_tree,
+        Q=Q,
+        branchRates=clock_rate,
+        nSites=1000,
+        type="DNA")
+
+mymodel = model(psi)
+
+n_simulations = 10
+for (i in 1:n_simulations) {
+    # Draw values of parameters from respective priors
+    population_size.redraw()
+    root_height.redraw()
+    gene_tree.redraw()
+    
+    # Want to simulate sequences along gene_tree and write the alignment to a
+    # file
+}

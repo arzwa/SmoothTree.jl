@@ -21,8 +21,9 @@ species tree with branch lengths in coalescent units.
 """
 struct MSC{T,V,Ψ}
     tree     ::Ψ
-    leafindex::Dict{String,V}
-    init     ::Dict{V,Vector{T}}
+    leafindex::Dict{String,V}     # species name to species tree node
+    init     ::Dict{V,Vector{T}}  # species tree node to gene tree leaves
+    names    ::Dict{V,String}     # gene tree leaf names
 end
 
 # construct MSC object
@@ -31,30 +32,64 @@ function MSC(tree)
     leaves = getleaves(tree)
     leafindex = Dict(name(n)=>id(n) for n in leaves)
     # default initialization
-    ls = sort(id.(leaves))
-    init = Dict(v=>typeof(v)[2^(i-1)] for (i,v) in enumerate(ls))
-    MSC(tree, leafindex, init)
+    leafids = id.(leaves)
+    T = eltype(leafids)
+    order = sortperm(leafids)
+    init  = Dict(v=>T[2^(i-1)] for (i,v) in enumerate(leafids[order]))
+    names = Dict(T(2^(i-1))=>name(l) for (i,l) in enumerate(leaves[order]))
+    MSC(tree, leafindex, init, names)
 end
 
 # adapt an existing MSC model to a new gene family
-(model::MSC)(ccd::CCD) = MSC(model.tree, model.leafindex, initmsc(model, ccd))
+(model::MSC)(ccd::CCD) = MSC(model.tree, model.leafindex, initmsc(model, ccd)...)
 
 # initialize the leaf genes for an MSC model for a gene family
 function initmsc(model, ccd::CCD{T}) where T
     @unpack leafindex = model
     d = Dict(v=>T[] for (k, v) in model.leafindex)
+    n = Dict{T,String}()
     for (g, γ) in ccd.lmap
         push!(d[leafindex[_spname(g)]], γ)
+        n[γ] = g
     end
-    return d
+    return d, n
 end
+
+# utilities for setting species tree branch lengths
+n_internal(S) = length(postwalk(S)) - length(getleaves(S)) - 1
+
+function setdistance!(S, θ::Vector)
+    for (i,n) in enumerate(postwalk(S))
+        isroot(n) && return
+        n.data.distance = θ[i]
+    end
+end
+
+function setdistance_internal!(S, θ::Vector)
+    i = 1
+    for n in postwalk(S)
+        (isroot(n) || isleaf(n)) && continue
+        n.data.distance = θ[i]
+        i += 1
+    end
+end
+
+function setdistance!(S, θ::Number)
+    for (i,n) in enumerate(postwalk(S))
+        isroot(n) && return
+        n.data.distance = θ
+    end
+end
+
+# define an alias
+const Splits{T} = Vector{Tuple{T,T}}
 
 # do n `randsplits` simulations
 randsplits(model::MSC, n) = map(_->randsplits(model), 1:n)
 
 # generate a tree from the MSC model, in the form of a set of splits.
 function randsplits(model::MSC{T}) where T
-    _, splits = _coalsplits(model.tree, Tuple{T,T}[], model.init)
+    _, splits = _coalsplits(model.tree, Splits{T}(), model.init)
     return splits
 end
 
@@ -86,9 +121,6 @@ function _censoredcoalsplits!(splits, t, lineages)
     return lineages, splits
 end
 
-# define an alias
-const Splits{T} = Vector{Tuple{T,T}}
-
 # construct a CCD object from a set of splits
 function CCD(model, splits::Vector{Splits{T}}; weights=uweights(splits)) where T
     ccd = initccd(model, splits[1])
@@ -98,10 +130,13 @@ function CCD(model, splits::Vector{Splits{T}}; weights=uweights(splits)) where T
     return ccd
 end
 
+# Initialize a CCD object for an MSC model. This could almost but not
+# quite be shared with the usual CCD constructor based on (gene)
+# trees, the difference being that here we have to make sure it works
+# when a species has multiple leaves.
 function initccd(model::MSC, splits::Splits{T}) where T
     leaves = collect(keys(model.leafindex))
     lmap = Dict{String,T}()
-    # we make sure it works when a species has multiple leaves
     for (k,v) in model.leafindex
         for (i,g) in enumerate(model.init[v])
             gname = "$(k)_$i"
@@ -113,6 +148,7 @@ function initccd(model::MSC, splits::Splits{T}) where T
     CCD(leaves, lmap, cmap, smap, 0)
 end
 
+# add a bunch of splits to a CCD
 function addsplits!(ccd, s, w=1.)
     for (γ, δ) in s
         _update!(ccd.cmap, ccd.smap, γ, δ)
@@ -122,28 +158,26 @@ function addsplits!(ccd, s, w=1.)
     ccd.total += 1
 end
 
-# utilities for setting species tree branch lengths
-n_internal(S) = length(postwalk(S)) - length(getleaves(S)) - 1
+# alias
+DefaultNode{T} = Node{T,NewickData{Float64,String}}
 
-function setdistance!(S, θ::Vector)
-    for (i,n) in enumerate(postwalk(S))
-        isroot(n) && return
-        n.data.distance = θ[i]
+# obtain a gene tree from a split set
+function treefromsplits(model::MSC, splits::Splits{T}) where T
+    nodes = Dict{T,DefaultNode{T}}()
+    for (γ, δ) in splits
+        p, l, r = map(c->_getnode!(nodes, model, c), [γ, δ, γ-δ])
+        push!(p, l, r)   
     end
+    return nodes[splits[end][1]]
 end
 
-function setdistance_internal!(S, θ::Vector)
-    i = 1
-    for n in postwalk(S)
-        (isroot(n) || isleaf(n)) && continue
-        n.data.distance = θ[i]
-        i += 1
-    end
+# helper functon for treefromsplits
+function _getnode!(nodes, model, n)
+    isleafclade(n) && return Node(n, n=model.names[n])
+    haskey(nodes, n) && return nodes[n]
+    nodes[n] = Node(n)
+    return nodes[n]
 end
 
-function setdistance!(S, θ::Number)
-    for (i,n) in enumerate(postwalk(S))
-        isroot(n) && return
-        n.data.distance = θ
-    end
-end
+# get a random tree from the MSC, *as a tree data structure*
+randtree(model::MSC) = treefromsplits(model, randsplits(model))

@@ -2,6 +2,66 @@ using Pkg; Pkg.activate(@__DIR__)
 using SmoothTree, Test, NewickTree, Serialization, StatsBase, Distributions
 using LinearAlgebra
 
+# ABC test
+# ========
+# What is this approach? pseudolikelihood? 
+# it does not work
+S = nw"((smo,(((gge,iov),(xtz,dzq)),sgt)),jvs);"
+θ = 1.
+SmoothTree.setdistance!(S, θ)
+model = SmoothTree.MSC(S)
+data = CCD(model, SmoothTree.randsplits(model, 1000))
+
+prior = Exponential()
+d = map(1:100000) do iteration
+    x = rand(prior)
+    SmoothTree.setdistance!(S, x)
+    simm = SmoothTree.MSC(S)
+    t = randsplits(simm)
+    l = logpdf(data, t)
+    (log(rand()) < l, l, x)
+end
+
+acc = first.(d) 
+v = last.(d[acc])
+stephist(v, color=:black); vline!([θ])
+
+# ABC
+prior = Exponential()
+d = map(1:10000) do iteration
+    x = rand(prior)
+    SmoothTree.setdistance!(S, x)
+    simm = SmoothTree.MSC(S)
+    sims = CCD(simm, randsplits(simm, 100))
+    d = SmoothTree.kldiv(data, sims, 1e-10)
+    (d, x)
+end
+
+acc = abs.(first.(d)) .< 20
+v = last.(d[acc])
+stephist(v, color=:black); vline!([θ])
+
+# multivariate
+S = nw"((smo,(((gge,iov),(xtz,dzq)),sgt)),jvs);"
+SmoothTree.setdistance_internal!(S, [1., 1.5, 0.5, 1., 2.])
+model = SmoothTree.MSC(S)
+data = CCD(model, SmoothTree.randsplits(model, 1000))
+
+prior = MvNormal(zeros(5), 1)
+d = map(1:100000) do iteration
+    θ = exp.(rand(prior))
+    SmoothTree.setdistance_internal!(S, θ)
+    simm = SmoothTree.MSC(S)
+    t = randsplits(simm)
+    l = logpdf(data, t)
+    (log(rand()) < l, l, θ)
+end
+
+acc = first.(d) 
+v = permutedims(hcat(last.(d[acc])...))
+mean(v, dims=1)
+
+
 # EP tests
 # First generate a simulated data set 
 # -----------------------------------
@@ -12,7 +72,7 @@ model = SmoothTree.MSC(S)
 
 # 2. simulate data
 # we do not include tree uncertainty here...
-data = [CCD(model, SmoothTree.randsplits(model)) for i=1:500]
+data = [CCD(model, [SmoothTree.randsplits(model)]) for i=1:500]
 
 #mm = MSC1(S)
 #trees = randtree(mm, 1000)

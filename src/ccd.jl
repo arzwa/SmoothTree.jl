@@ -123,6 +123,9 @@ function rootall!(trees, leaf)
     map(f, trees)
 end
 
+# generic extension of randtree (also works for MSC)
+randtree(model, n) = map(_->randtree(model), 1:n)
+
 # draw a tree from the ccd, simulates a tree as a set of splits
 function randtree(ccd::CCD{T}) where T
     root = maximum(keys(ccd.cmap))
@@ -217,18 +220,28 @@ function getclades(tree)
     return clades
 end
 
-# compute the KL-divergence between two CCDs
-function kldiv(x::CCD, y::CCD)  # d(x||y) = ∫p(x)log(p(x)/q(x))dx
+"""
+    kldiv(x::CCD, y::CCD, ϵ=0)
+
+Compute the KL divergence `d(x||y) = ∑ₓp(x)log(p(x)/q(x))` with an
+optional bias term ϵ for events with probability 0.  I am unsure
+whether this implementation, which compares the conditional clade
+probabilities, corresponds to the desired ∑_{T} p(T) log(p(T)/q(T))
+where T are tree topologies.
+"""
+function kldiv(x::CCD, y::CCD, ϵ=0.)  
     d = 0. 
     for (γ, pγ) in x.cmap
         isleafclade(γ) && continue
-        !haskey(y.cmap, γ) && return Inf
+        yhas = haskey(y.cmap, γ) 
+        qγ = yhas ? y.cmap[γ] : ϵ 
         for (δ, pδ) in x.smap[γ]
-            !haskey(y.smap[γ], δ) && return Inf
+            qδ = (yhas && haskey(y.smap[γ], δ)) ? y.smap[γ][δ] : ϵ
             p = pδ/pγ
-            q = y.smap[γ][δ]/y.cmap[γ]
+            q = qδ/qγ
             d += p* log(p/q)
         end
+        !isfinite(d) && return Inf
     end
     return d
 end
