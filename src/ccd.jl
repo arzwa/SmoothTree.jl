@@ -10,6 +10,8 @@
 
 # TODO: Better use DefaultDict, so that, a.o. logpdf does not break
 # when a clade is not present in a tree (but just return -Inf)
+# perhaps don't do this after all, but include optional regularization
+# (i.e. assume a Dirichlet(α) prior for the categorical tree distribution)
 """
     CCD
 
@@ -20,15 +22,14 @@ mutable struct CCD{T,V}
     lmap  ::Dict{String,T}
     cmap  ::Dict{T,V}          # clade counts
     smap  ::Dict{T,Dict{T,V}}  # split counts
-    total ::Int64
+    α     ::Float64
 end
 
 nl(X::CCD) = length(X.leaves)
 nc(X::CCD) = length(X.cmap)
-nt(X::CCD) = X.total
 
 function Base.show(io::IO, X::CCD{T}) where T
-    write(io, "CCD{$T}(n=$(nl(X)), Γ=$(nc(X)), N=$(nt(X)))")
+    write(io, "CCD{$T}(n=$(nl(X)), Γ=$(nc(X)))")
 end
 
 function showclades(X::CCD)
@@ -43,13 +44,14 @@ getclade(ccd::CCD, clade) = ccd.leaves[Bool.(digits(clade, base=2, pad=nl(ccd)))
 
 # conditional clade probability
 ccp(ccd::CCD, γ, δ) = ccd.smap[γ][δ] / ccd.cmap[γ]
+logccp(ccd, γ, δ) = log(ccd.smap[γ][δ]) - log(ccd.cmap[γ])
 
 # uniform weights for a given vector of elements 
 uweights(xs) = fill(1/length(xs), length(xs))
 
 # from a vector of trees
-function CCD(trees; weights=uweights(trees), T=UInt16)
-    ccd = initccd(trees[1], T)
+function CCD(trees; weights=uweights(trees), α=0., T=UInt16)
+    ccd = initccd(trees[1], T, α)
     for (tree, weight) in zip(trees, weights)
         ccd = addtree!(ccd, tree, weight)
     end
@@ -57,19 +59,19 @@ function CCD(trees; weights=uweights(trees), T=UInt16)
 end
 
 # from a proportionmap
-CCD(trees::Dict; T=UInt16) = 
-    CCD(collect(keys(trees)), weights=collect(values(trees)), T=T)
+CCD(trees::Dict; kwargs...) = 
+    CCD(collect(keys(trees)), weights=collect(values(trees)); kwargs...)
 
 # For a single tree
-CCD(tree::Node; T=UInt16) = CCD([tree], T=T)
+CCD(tree::Node; kwargs...) = CCD([tree]; kwargs...)
 
-function initccd(tree::Node, T=UInt16)
+function initccd(tree::Node, T=UInt16, α=0.)
     lmap = leafclades(tree, T)
     cmap = Dict{T,Float64}(l=>0. for (_,l) in lmap)
     smap = Dict{T,Dict{T,Float64}}()
     kv = collect(lmap)
     leaves = first.(sort(kv, by=last))
-    ccd = CCD(leaves, lmap, cmap, smap, 0)
+    ccd = CCD(leaves, lmap, cmap, smap, 0.)
 end
 
 function leafclades(tree, T=UInt16)
@@ -97,7 +99,6 @@ function addtree!(ccd::CCD, tree, w=1.)
         end
     end
     walk(tree)
-    ccd.total += 1
     return ccd
 end
 
@@ -110,6 +111,9 @@ function _update!(m1, m2, y, x)
         m2[y][x] = 0
     end
 end
+
+# check whether a split is present in the (observed part of) a ccd
+inccd(ccd, γ, δ) = haskey(ccd.cmap, γ) && haskey(ccd.smap[γ], δ)
 
 # root all trees identically
 function rootall!(trees)
@@ -144,14 +148,30 @@ function _randwalk(splits, clade, ccd)
     return splits
 end
 
+# XXX: Ideally, we'd check in some way whether the leaf set of the ccd
+# and provided splits actually corresponds, if not return -Inf, but
+# that induces an overhead I guess...
 # compute the probability of a set of splits
 function logpdf(ccd::CCD, splits::Vector{T}) where T<:Tuple
     ℓ = 0.
     for (γ, δ) in splits
-        (!haskey(ccd.cmap, γ) || !haskey(ccd.smap[γ], δ)) && return -Inf
-        ℓ += log(ccd.smap[γ][δ]) - log(ccd.cmap[γ])
+        # prior contribution
+        ℓ += _splitp(ccd, γ, δ)
     end
     return ℓ
+end
+
+# The contribution of a single split to the tree probability
+# currently assumes the uniform prior over splits.
+function _splitp(ccd, γ, δ)
+    n = count_ones(γ)
+    p = log(ccd.α) - log(2^(n-1) - 1)
+    #p = ccd.α/(2.0^(n-1) - 1.0)
+    if inccd(ccd, γ, δ)
+        p = logaddexp(p, log(1-ccd.α) + logccp(ccd, γ, δ))
+        #p += (1.0-ccd.α)*ccp(ccd, γ, δ)
+    end
+    return p
 end
 
 # compute the probability mass of a single tree under the CCD
@@ -166,8 +186,7 @@ function _lwalk(n::Node, ccd, ℓ)
     ℓ, rght = _lwalk(n[2], ccd, ℓ)
     δ = left < rght ? left : rght
     γ = left + rght
-    (!haskey(ccd.cmap, γ) || !haskey(ccd.smap[γ], δ)) && return -Inf, γ
-    ℓ += log(ccd.smap[γ][δ]) - log(ccd.cmap[γ])
+    ℓ += _splitp(ccd, γ, δ) 
     return ℓ, γ
 end
 

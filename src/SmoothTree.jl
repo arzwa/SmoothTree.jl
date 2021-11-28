@@ -3,11 +3,11 @@ module SmoothTree
 using NewickTree, StatsBase, Parameters, Random, StatsFuns, Distributions
 using DataStructures
 import Distributions: logpdf
-export CCD
+export CCD, MSC, randtree, randsplits, setdistance!, setdistance_internal!
 
 include("ccd.jl")
 include("msc.jl")
-include("rearrangement.jl")
+include("nni.jl")
 #include("epabc.jl")
 #include("mulccd.jl")
 #include("ep-abc-msc.jl")

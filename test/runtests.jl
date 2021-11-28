@@ -25,4 +25,16 @@ using BenchmarkTools, Serialization, StatsBase, Distributions
         @btime logpdf(ccd, tree);
         # 237.594 ns (1 allocation: 16 bytes)
     end
+
+    @testset "MSC" begin
+        using SmoothTree: randtree, isisomorphic
+        S = nw"(((((A,B),C),(D,E)),(F,(G,H))),O);"
+        SmoothTree.setdistance!(S, Inf)
+        @test isisomorphic(randtree(MSC(S)), S)
+        S = nw"((A,B),C);"
+        SmoothTree.setdistance!(S, 0.)
+        trees = proportionmap(randsplits(MSC(S), 1e5))
+        @test all(values(trees) .- 1/3 .< 0.01)
+    end
+
 end
