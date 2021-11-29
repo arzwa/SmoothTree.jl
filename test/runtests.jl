@@ -38,8 +38,10 @@ using BenchmarkTools, Serialization, StatsBase, Distributions
     end
 
     @testset "Prior/regularization" begin
+        using SmoothTree: initccd
         S = nw"(((A,B),C),D);"
-        ccd = CCD([S], α=1.)
+        ccd = initccd(S, UInt8, 1.)  # an empty CCD
+        @test ccd.cmap[maximum(keys(ccd.cmap))] == 0
         trees = proportionmap(randtree(ccd, 10000))
         # there should be 15 trees, three balanced ones and 12
         # unbalanced ones
@@ -49,6 +51,36 @@ using BenchmarkTools, Serialization, StatsBase, Distributions
             expected = nl(k[1]) == nl(k[2]) ? 0.15 : 0.05
             @test expected ≈ v atol=0.01
         end
+    end
+
+    @testset "logpdf" begin
+        # we test whether the probability distribution sums to one
+        using SmoothTree: initccd
+        S = nw"(((A,B),C),D);"
+        # prior distribution sums to one
+        ccd = initccd(S, UInt8, 1.)  # an empty CCD
+        trees = unique(randtree(ccd, 10000))
+        @test length(trees) == 15
+        p = mapreduce(tree->exp(logpdf(ccd, tree)), +, trees)
+        @test p ≈ 1
+        # known tree gives P = 1
+        ccd = CCD(S, α=0.)
+        @test logpdf(ccd, randtree(ccd)) ≈ 0.
+        # posterior sums to one
+        ccd = CCD(S, α=.5)
+        trees = unique(randtree(ccd, 10000))
+        p = mapreduce(tree->exp(logpdf(ccd, tree)), +, trees)
+        @test p ≈ 1.
+    end
+
+    @testset "CCD from MSC sims" begin
+        S = nw"((smo,(((gge,iov),(xtz,dzq)),sgt)),jvs);"
+        θ = 1.
+        SmoothTree.setdistance!(S, θ)
+        model = MSC(S)
+        data1 = CCD(model, randsplits(model, 10), α=1e-2)
+        data2 = CCD(model, randsplits(model, 10), α=1e-2)
+        SmoothTree.symmkldiv(data1, data2)
     end
 
 end

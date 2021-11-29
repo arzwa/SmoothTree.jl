@@ -12,7 +12,7 @@ S = nw"((smo,(((gge,iov),(xtz,dzq)),sgt)),jvs);"
 θ = 0.5
 SmoothTree.setdistance!(S, θ)
 model = SmoothTree.MSC(S)
-data = CCD(model, SmoothTree.randsplits(model, n), α=1e-3)
+data = CCD(model, SmoothTree.randsplits(model, n), α=1/n)
 
 # 1.2 ABC based inference
 prior = Exponential()
@@ -22,25 +22,31 @@ allsims = map(1:nsims) do iteration
     x = rand(prior)
     SmoothTree.setdistance!(S, x)
     simm = SmoothTree.MSC(S)
-    sims = CCD(simm, randsplits(simm, simsize), α=1e-3)
-    d = SmoothTree.symmkldiv(data, sims)
+    sims = CCD(simm, randsplits(simm, simsize), α=1/simsize)
+    #d = SmoothTree.symmkldiv(data, sims)
+    #d = SmoothTree.kldiv(sims, data)
+    d = SmoothTree.kldiv(data, sims)
     (d, x)
 end
+# it seems to work best with kldiv(data, sims), which makes sense, as
+# we wish to minimize this quantity, i.e. this is the 'amount of
+# information lost when approximating data by sims'. It also works
+# reasonably well with the symmetric divergence.
 
 # Plot the densities for different ABC kernel widths
 ds = first.(allsims)
-qs = quantile(ds, [0.05, 0.10, 0.20, 0.5])
+qs = quantile(ds, [0.05, 0.10, 0.20, 0.5, 1.])
 p = vline([θ], color=:black, lw=2.)
-for h in reverse(qs)
+for (i,h) in enumerate(reverse(qs))
     acc = ds .< h
     v = last.(allsims[acc])
-    density!(v, fill=true, fillalpha=0.3); 
+    i == 1 ? density!(v, color=:black) : 
+        density!(v, fill=true, fillalpha=0.1); 
 end
-plot(p, size=(300,200), ylim=(-Inf,Inf), xlim=(-Inf,Inf))
+plot(p, size=(300,200), ylim=(-Inf,Inf), xlim=(0.,5))
 
-# Note that it is absolutely crucial that the α parameter is the same
-# in the data and simulations.
-
+# We seem to get best performance when setting α very low for the
+# simulated data, what is the logic there? 
 
 # 2. Fixed species tree, multivariate
 # 2.1 Simulate data
@@ -60,8 +66,9 @@ allsims = map(1:nsims) do iteration
     x = rand(prior)
     SmoothTree.setdistance_internal!(S, exp.(x))
     simm = SmoothTree.MSC(S)
-    sims = CCD(simm, randsplits(simm, simsize), α=1/n)
-    d = SmoothTree.symmkldiv(data, sims)
+    sims = CCD(simm, randsplits(simm, simsize), α=1/simsize)
+    #d = SmoothTree.symmkldiv(data, sims)
+    d = SmoothTree.kldiv(data, sims)
     (d, x)
 end
 
@@ -109,8 +116,9 @@ allsims = map(1:nsims) do iteration
     x = rand(θprior)
     SmoothTree.setdistance_internal!(T, exp.(x))
     simm = SmoothTree.MSC(T)
-    sims = CCD(simm, randsplits(simm, simsize), α=1/n)
-    d = SmoothTree.symmkldiv(data, sims)
+    sims = CCD(simm, randsplits(simm, simsize), α=1/simsize)
+    #d = SmoothTree.symmkldiv(data, sims)
+    d = SmoothTree.kldiv(data, sims)
     (d, T, x)
 end
 

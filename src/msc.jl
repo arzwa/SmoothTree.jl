@@ -96,9 +96,6 @@ function setdistance!(S, θ::Number)
     end
 end
 
-# define an alias
-const Splits{T} = Vector{Tuple{T,T}}
-
 # do n `randsplits` simulations
 randsplits(model::MSC, n) = map(_->randsplits(model), 1:n)
 
@@ -137,10 +134,10 @@ function _censoredcoalsplits!(splits, t, lineages)
 end
 
 # construct a CCD object from a set of splits
-function CCD(model, splits::Vector{Splits{T}}; weights=uweights(splits), α=0.) where T
+function CCD(model::MSC, splits::Vector{Splits{T}}; α=0.) where T
     ccd = initccd(model, splits[1], α)
-    for (s, weight) in zip(splits, weights)
-        addsplits!(ccd, s, weight)
+    for x in splits
+        addsplits!(ccd, x)
     end
     return ccd
 end
@@ -158,13 +155,14 @@ function initccd(model::MSC, splits::Splits{T}, α=0.) where T
             lmap[gname] = g
         end
     end
-    cmap = Dict(l=>0. for (_,l) in lmap)
-    smap = Dict{T,Dict{T,Float64}}()
-    CCD(leaves, lmap, cmap, smap, α)
+    cmap = Dict{T,Int64}(l=>0 for (_,l) in lmap)
+    smap = Dict{T,Dict{T,Int64}}()
+    root = T(sum(values(lmap)))
+    CCD(leaves, lmap, cmap, smap, root, α)
 end
 
 # add a bunch of splits to a CCD
-function addsplits!(ccd, s, w=1.)
+function addsplits!(ccd, s, w=1)
     for (γ, δ) in s
         _update!(ccd.cmap, ccd.smap, γ, δ)
         ccd.cmap[γ] += w

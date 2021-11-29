@@ -8,10 +8,10 @@
 # possible splits, so that vector based representations are probably
 # optimal.
 
-# TODO: Better use DefaultDict, so that, a.o. logpdf does not break
-# when a clade is not present in a tree (but just return -Inf)
-# perhaps don't do this after all, but include optional regularization
-# (i.e. assume a Dirichlet(α) prior for the categorical tree distribution)
+# aliases
+const DefaultNode{T} = Node{T,NewickData{Float64,String}}
+const Splits{T} = Vector{Tuple{T,T}}
+
 """
     CCD
 
@@ -22,6 +22,7 @@ mutable struct CCD{T,V}
     lmap  ::Dict{String,T}
     cmap  ::Dict{T,V}          # clade counts
     smap  ::Dict{T,Dict{T,V}}  # split counts
+    root  ::T
     α     ::Float64
 end
 
@@ -53,37 +54,46 @@ logccp(ccd, γ, δ) = log(ccd.smap[γ][δ]) - log(ccd.cmap[γ])
 uweights(xs) = fill(1/length(xs), length(xs))
 
 # from a vector of trees
-function CCD(trees; weights=uweights(trees), α=0., T=UInt16)
+function CCD(trees; α=0., T=UInt16)
     ccd = initccd(trees[1], T, α)
-    for (tree, weight) in zip(trees, weights)
-        ccd = addtree!(ccd, tree, weight)
+    for tree in trees
+        ccd = addtree!(ccd, tree)
     end
     return ccd
 end
 
-# from a proportionmap
-CCD(trees::Dict; kwargs...) = 
-    CCD(collect(keys(trees)), weights=collect(values(trees)); kwargs...)
+# from a countmap
+CCD(trees::Dict; kwargs...) = CCD(collect(trees); kwargs...)
 
 # For a single tree
 CCD(tree::Node; kwargs...) = CCD([tree]; kwargs...)
 
+# initialize a ccd, either from a tree or a pair tree => count
+initccd(tpair, args...) = initccd(first(tpair), args...)  
 function initccd(tree::Node, T=UInt16, α=0.)
     lmap = leafclades(tree, T)
-    cmap = Dict{T,Float64}(l=>0. for (_,l) in lmap)
-    smap = Dict{T,Dict{T,Float64}}()
+    cmap = Dict{T,Int64}(l=>0 for (_,l) in lmap)
+    smap = Dict{T,Dict{T,Int64}}()
     kv = collect(lmap)
     leaves = first.(sort(kv, by=last))
-    ccd = CCD(leaves, lmap, cmap, smap, α)
+    root = T(sum(last.(kv)))
+    cmap[root] = 0  
+    smap[root] = Dict{T,Int64}()
+    # Note that the rootclade must always be present for randtree
+    # to work, also if there are no observations added to the CCD 
+    ccd = CCD(leaves, lmap, cmap, smap, root, α)
 end
 
+# assign leaf clade numbers (base 2)
 function leafclades(tree, T=UInt16)
     l = name.(getleaves(tree))
-    d = Dict(k=>one(T) << T(i-1) for (i,k) in enumerate(l))
+    d = Dict{String,T}(k=>one(T) << T(i-1) for (i,k) in enumerate(l))
     return d
 end
 
-function addtree!(ccd::CCD, tree, w=1.)
+# add a tree/number of identical trees to the CCD
+addtree!(ccd::CCD, tpair) = addtree!(ccd, tpair[1], tpair[2])  
+function addtree!(ccd::CCD, tree::Node, w=1)
     @unpack lmap, cmap, smap = ccd
     function walk(n)
         if isleaf(n)
@@ -117,29 +127,19 @@ end
 
 # check whether a split is present in the (observed part of) a ccd
 inccd(ccd, γ, δ) = haskey(ccd.cmap, γ) && haskey(ccd.smap[γ], δ)
-inccd(ccd, γ) = haskey(ccd.cmap, γ)
+inccd(ccd, γ) = haskey(ccd.cmap, γ) && !(ccd.cmap[γ] == 0)
 
-# root all trees identically
-function rootall!(trees)
-    tree = first(trees)
-    leaf = name(first(getleaves(tree)))
-    rootall!(trees, leaf)
-end
-
-function rootall!(trees, leaf)
-    f = x->NewickTree.set_outgroup!(x, leaf)
-    map(f, trees)
-end
+# the number of possible splits of a set of size n
+_ns(n) = 2^(n-1) - 1
 
 # draw a tree from the ccd, simulates a tree as a set of splits
-# XXX This is only correct for α=0.
 function randsplits(ccd::CCD{T}) where T
-    root = maximum(keys(ccd.cmap))
     return ccd.α == 0. ? 
-        _randwalk1(Tuple{T,T}[], root, ccd) : 
-        _randwalk2(Tuple{T,T}[], root, ccd)
+        _randwalk1(Tuple{T,T}[], ccd.root, ccd) : 
+        _randwalk2(Tuple{T,T}[], ccd.root, ccd)
 end
 
+# simple algorithm for α = 0. case
 function _randwalk1(splits, clade, ccd)
     isleafclade(clade) && return splits
     csplits = collect(ccd.smap[clade])
@@ -152,19 +152,39 @@ function _randwalk1(splits, clade, ccd)
     return splits
 end
 
+# α > 0. case
 function _randwalk2(splits, clade, ccd)
-    isleafclade(clade) && return splits
-    # XXX here the α mixture approach is quite awkward?
-    if rand() < ccd.α || !inccd(ccd, clade)
+    isleafclade(clade) && return splits 
+    left = if !inccd(ccd, clade)
+        # uniform random split XXX: this is a bit weird, since
+        # unobserved clades can lead to splits which contain observed
+        # clade, but we don't account for that...
         splt = randsplit(clade)
         left = min(splt, clade - splt)
-        rght = clade - left
     else
         csplits = collect(ccd.smap[clade])
-        splt = sample(1:length(csplits), Weights(last.(csplits)))
-        left = first(csplits[splt])
-        rght = clade - left
+        observed_splits = first.(csplits)
+        weights = last.(csplits)
+        k = length(csplits)   # number of splits
+        n = cladesize(clade)  
+        N = ccd.cmap[clade]
+        # probability of an observed split
+        denom = log(ccd.α * _ns(n) + N)
+        lpobs = log(k*ccd.α + N) - denom
+        if log(rand()) < lpobs
+            # observed split
+            splt = sample(1:k, Weights(weights))
+            left = observed_splits[splt]
+        else  
+            # unobserved split
+            left = randsplit(clade)
+            while left ∈ observed_splits  # XXX rejection sampler
+                left = randsplit(clade)
+            end
+            left
+        end
     end
+    rght = clade - left
     push!(splits, (clade, left))
     splits = _randwalk2(splits, left, ccd)
     splits = _randwalk2(splits, rght, ccd)
@@ -176,18 +196,17 @@ end
 function randsplit(γ::T) where T
     g = digits(γ, base=2)
     n = sum(g)
-    x = rand(1:(2^(n-1)-1))
+    x = rand(1:_ns(n))
     d = digits(x, base=2)
     tips = [(i-1) for (i,gi) in enumerate(g) if gi == 1]
     subclade = 0
     for i=1:length(d)
         subclade += d[i] * 2^tips[i]
     end
-    return T(subclade)
+    splt = T(subclade)
+    left = min(splt, γ - splt)
+    return left
 end
-
-# alias
-DefaultNode{T} = Node{T,NewickData{Float64,String}}
 
 # obtain a gene tree from a split set
 function treefromsplits(splits::Splits{T}, names::Dict) where T
@@ -218,31 +237,25 @@ end
 randtree(model, n) = map(_->randtree(model), 1:n)
 
 # XXX: Ideally, we'd check in some way whether the leaf set of the ccd
-# and provided splits actually corresponds, if not return -Inf, but
-# that induces an overhead I guess...
+# and check if splits actually correspond to splits in the ccd, if not
+# return -Inf, but that induces an overhead I guess...
 # compute the probability of a set of splits
 function logpdf(ccd::CCD, splits::Vector{T}) where T<:Tuple
     ℓ = 0.
     for (γ, δ) in splits
-        # prior contribution
         ℓ += _splitp(ccd, γ, δ)
     end
     return ℓ
 end
 
-# prior probability under uniform over splits
-_priorp(γ) = 2^(count_ones(γ) - 1) - 1
-
 # The contribution of a single split to the tree probability
 # currently assumes the uniform prior over splits.
 function _splitp(ccd, γ, δ)
-    p = log(ccd.α) - log(_priorp(γ))
-    #p = ccd.α/(2.0^(n-1) - 1.0)
-    if inccd(ccd, γ, δ)
-        p = logaddexp(p, log(1-ccd.α) + logccp(ccd, γ, δ))
-        #p += (1.0-ccd.α)*ccp(ccd, γ, δ)
-    end
-    return p
+    n = cladesize(γ)
+    Z = ccd.α * _ns(n)
+    Z += inccd(ccd, γ) ? ccd.cmap[γ] : 0
+    nδ = inccd(ccd, γ, δ) ? ccd.smap[γ][δ] : 0
+    log(ccd.α + nδ) - log(Z)
 end
 
 # compute the probability mass of a single tree under the CCD
@@ -318,23 +331,40 @@ Compute the (a) KL divergence `d(p||q) = ∑ₓp(x)log(p(x)/q(x))`.
 Not sure how exactly we should do this. For each clade compute the
 kldivergence for its split distribution, and weight these
 kldivergences by the probability that a tree contains the clade?
+
+This is hacky, we get something, but I don't think we can call it the
+KL divergence...
 """
 function kldiv(p::CCD, q::CCD)  
     D = 0. 
+    # there are four different cases:
+    # 1. clade observed in both
+    # 2. clade observed in p, not in q
+    # 3. clade observed in q, not in p
+    # 4. clade observed in neither p nor q
+    # in case 4, the p/q ratio becomes 1, so they can be ignored
     for (γ, dict) in p.smap
+        # clade observed in p
         d = 0.
-        p0 = log(_priorp(γ))
-        qprior = log(q.α) + p0
-        pprior = log(p.α) + p0
-        for δ in keys(dict)
-            qx = qprior
-            if inccd(q, γ, δ) 
-                qx = logaddexp(qx, log(1-q.α) + logccp(q, γ, δ))
-            end
-            px = logaddexp(pprior, log(1-p.α) + logccp(p, γ, δ))
-            d += exp(px)*(px - qx)
+        # contribution of observed splits in p (case 1 and 2)
+        for (δ, n) in dict
+            pγδ = _splitp(p, γ, δ)
+            qγδ = _splitp(q, γ, δ)
+            d += exp(pγδ)*(pγδ - qγδ)
         end
-        D += d*p.cmap[γ]
+        # contribution from splits of γ observed in q but not in p
+        if inccd(q, γ)
+            for (δ, n) in q.smap[γ]
+                inccd(p, γ, δ) && continue  # already seen this one
+                pγδ = _splitp(p, γ, δ)
+                pγδ == -Inf && continue  
+                # the above is how KL is defined. Motivation is that
+                # lim(x->0) xlog(x) = 0 (not -Inf)
+                qγδ = _splitp(q, γ, δ)
+                d += exp(pγδ)*(pγδ - qγδ)
+            end
+        end
+        D += d*p.cmap[γ]/p.cmap[p.root]
     end
     return D
 end

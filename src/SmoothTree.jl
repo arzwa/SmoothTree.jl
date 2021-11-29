@@ -5,6 +5,7 @@ using DataStructures
 import Distributions: logpdf
 export CCD, MSC, randtree, randsplits, setdistance!, setdistance_internal!
 
+include("utils.jl")
 include("ccd.jl")
 include("msc.jl")
 include("nni.jl")
