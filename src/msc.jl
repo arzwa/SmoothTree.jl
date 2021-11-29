@@ -154,7 +154,7 @@ function initccd(model::MSC, splits::Splits{T}, α=0.) where T
     lmap = Dict{String,T}()
     for (k,v) in model.leafindex
         for (i,g) in enumerate(model.init[v])
-            gname = "$(k)_$i"
+            gname = i == 1 ? k : "$(k)_$i"  # bit hacky...
             lmap[gname] = g
         end
     end
@@ -172,29 +172,8 @@ function addsplits!(ccd, s, w=1.)
     end
 end
 
-# alias
-DefaultNode{T} = Node{T,NewickData{Float64,String}}
-
-# obtain a gene tree from a split set
-function treefromsplits(model::MSC, splits::Splits{T}) where T
-    nodes = Dict{T,DefaultNode{T}}()
-    for (γ, δ) in splits
-        p, l, r = map(c->_getnode!(nodes, model, c), [γ, δ, γ-δ])
-        push!(p, l, r)   
-    end
-    return nodes[splits[end][1]]
-end
-
-# helper functon for treefromsplits
-function _getnode!(nodes, model, n)
-    isleafclade(n) && return Node(n, n=model.names[n])
-    haskey(nodes, n) && return nodes[n]
-    nodes[n] = Node(n)
-    return nodes[n]
-end
-
 # get a random tree from the MSC, *as a tree data structure*
-randtree(model::MSC) = treefromsplits(model, randsplits(model))
+randtree(model::MSC) = treefromsplits(randsplits(model), model.names)
 
 # The above all simulates *topologies*, but we may also want functions
 # to simulate coalescent histories, i.e. with branch lengths...

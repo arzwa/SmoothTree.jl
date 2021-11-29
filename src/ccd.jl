@@ -39,6 +39,9 @@ end
 # check if some bitclade represents a leaf
 isleafclade(clade) = count_ones(clade) == 1
 
+# get the number of leaves in a clade
+cladesize(clade) = count_ones(clade)
+
 # obtain the clade leaf names from its Int representation
 getclade(ccd::CCD, clade) = ccd.leaves[Bool.(digits(clade, base=2, pad=nl(ccd)))]
 
@@ -71,7 +74,7 @@ function initccd(tree::Node, T=UInt16, α=0.)
     smap = Dict{T,Dict{T,Float64}}()
     kv = collect(lmap)
     leaves = first.(sort(kv, by=last))
-    ccd = CCD(leaves, lmap, cmap, smap, 0.)
+    ccd = CCD(leaves, lmap, cmap, smap, α)
 end
 
 function leafclades(tree, T=UInt16)
@@ -114,6 +117,7 @@ end
 
 # check whether a split is present in the (observed part of) a ccd
 inccd(ccd, γ, δ) = haskey(ccd.cmap, γ) && haskey(ccd.smap[γ], δ)
+inccd(ccd, γ) = haskey(ccd.cmap, γ)
 
 # root all trees identically
 function rootall!(trees)
@@ -127,26 +131,91 @@ function rootall!(trees, leaf)
     map(f, trees)
 end
 
-# generic extension of randtree (also works for MSC)
-randtree(model, n) = map(_->randtree(model), 1:n)
-
 # draw a tree from the ccd, simulates a tree as a set of splits
-function randtree(ccd::CCD{T}) where T
+# XXX This is only correct for α=0.
+function randsplits(ccd::CCD{T}) where T
     root = maximum(keys(ccd.cmap))
-    return _randwalk(Tuple{T,T}[], root, ccd)
+    return ccd.α == 0. ? 
+        _randwalk1(Tuple{T,T}[], root, ccd) : 
+        _randwalk2(Tuple{T,T}[], root, ccd)
 end
 
-function _randwalk(splits, clade, ccd)
+function _randwalk1(splits, clade, ccd)
     isleafclade(clade) && return splits
     csplits = collect(ccd.smap[clade])
     splt = sample(1:length(csplits), Weights(last.(csplits)))
     left = first(csplits[splt])
     rght = clade - left
     push!(splits, (clade, left))
-    splits = _randwalk(splits, left, ccd)
-    splits = _randwalk(splits, rght, ccd)
+    splits = _randwalk1(splits, left, ccd)
+    splits = _randwalk1(splits, rght, ccd)
     return splits
 end
+
+function _randwalk2(splits, clade, ccd)
+    isleafclade(clade) && return splits
+    # XXX here the α mixture approach is quite awkward?
+    if rand() < ccd.α || !inccd(ccd, clade)
+        splt = randsplit(clade)
+        left = min(splt, clade - splt)
+        rght = clade - left
+    else
+        csplits = collect(ccd.smap[clade])
+        splt = sample(1:length(csplits), Weights(last.(csplits)))
+        left = first(csplits[splt])
+        rght = clade - left
+    end
+    push!(splits, (clade, left))
+    splits = _randwalk2(splits, left, ccd)
+    splits = _randwalk2(splits, rght, ccd)
+    return splits
+end
+
+# could be more efficient I guess, also requires the number 2^(n-1),
+# which becomes prohibitive for large n
+function randsplit(γ::T) where T
+    g = digits(γ, base=2)
+    n = sum(g)
+    x = rand(1:(2^(n-1)-1))
+    d = digits(x, base=2)
+    tips = [(i-1) for (i,gi) in enumerate(g) if gi == 1]
+    subclade = 0
+    for i=1:length(d)
+        subclade += d[i] * 2^tips[i]
+    end
+    return T(subclade)
+end
+
+# alias
+DefaultNode{T} = Node{T,NewickData{Float64,String}}
+
+# obtain a gene tree from a split set
+function treefromsplits(splits::Splits{T}, names::Dict) where T
+    nodes = Dict{T,DefaultNode{T}}()
+    for (γ, δ) in splits
+        p, l, r = map(c->_getnode!(nodes, names, c), [γ, δ, γ-δ])
+        push!(p, l, r)   
+    end
+    return getroot(nodes[splits[end][1]])
+end
+
+# helper functon for treefromsplits
+function _getnode!(nodes, names, n)
+    isleafclade(n) && return Node(n, n=names[n])
+    haskey(nodes, n) && return nodes[n]
+    nodes[n] = Node(n)
+    return nodes[n]
+end
+
+# draw a random tree from the CCD
+function randtree(ccd::CCD)
+    splits = randsplits(ccd)
+    names = Dict(v=>k for (k,v) in ccd.lmap)
+    treefromsplits(splits, names)
+end
+
+# generic extension of randtree (also works for MSC)
+randtree(model, n) = map(_->randtree(model), 1:n)
 
 # XXX: Ideally, we'd check in some way whether the leaf set of the ccd
 # and provided splits actually corresponds, if not return -Inf, but
@@ -161,11 +230,13 @@ function logpdf(ccd::CCD, splits::Vector{T}) where T<:Tuple
     return ℓ
 end
 
+# prior probability under uniform over splits
+_priorp(γ) = 2^(count_ones(γ) - 1) - 1
+
 # The contribution of a single split to the tree probability
 # currently assumes the uniform prior over splits.
 function _splitp(ccd, γ, δ)
-    n = count_ones(γ)
-    p = log(ccd.α) - log(2^(n-1) - 1)
+    p = log(ccd.α) - log(_priorp(γ))
     #p = ccd.α/(2.0^(n-1) - 1.0)
     if inccd(ccd, γ, δ)
         p = logaddexp(p, log(1-ccd.α) + logccp(ccd, γ, δ))
@@ -240,29 +311,33 @@ function getclades(tree)
 end
 
 """
-    kldiv(x::CCD, y::CCD, ϵ=0)
+    kldiv(p::CCD, q::CCD)
 
-Compute the KL divergence `d(x||y) = ∑ₓp(x)log(p(x)/q(x))` with an
-optional bias term ϵ for events with probability 0.  I am unsure
-whether this implementation, which compares the conditional clade
-probabilities, corresponds to the desired ∑_{T} p(T) log(p(T)/q(T))
-where T are tree topologies.
+Compute the (a) KL divergence `d(p||q) = ∑ₓp(x)log(p(x)/q(x))`.
+
+Not sure how exactly we should do this. For each clade compute the
+kldivergence for its split distribution, and weight these
+kldivergences by the probability that a tree contains the clade?
 """
-function kldiv(x::CCD, y::CCD, ϵ=0.)  
-    d = 0. 
-    for (γ, pγ) in x.cmap
-        isleafclade(γ) && continue
-        yhas = haskey(y.cmap, γ) 
-        qγ = yhas ? y.cmap[γ] : ϵ 
-        for (δ, pδ) in x.smap[γ]
-            qδ = (yhas && haskey(y.smap[γ], δ)) ? y.smap[γ][δ] : ϵ
-            p = pδ/pγ
-            q = qδ/qγ
-            d += p* log(p/q)
+function kldiv(p::CCD, q::CCD)  
+    D = 0. 
+    for (γ, dict) in p.smap
+        d = 0.
+        p0 = log(_priorp(γ))
+        qprior = log(q.α) + p0
+        pprior = log(p.α) + p0
+        for δ in keys(dict)
+            qx = qprior
+            if inccd(q, γ, δ) 
+                qx = logaddexp(qx, log(1-q.α) + logccp(q, γ, δ))
+            end
+            px = logaddexp(pprior, log(1-p.α) + logccp(p, γ, δ))
+            d += exp(px)*(px - qx)
         end
-        !isfinite(d) && return Inf
+        D += d*p.cmap[γ]
     end
-    return d
+    return D
 end
 
-
+# symmetrized KL divergence
+symmkldiv(p, q) = kldiv(p, q) + kldiv(q, p)

@@ -1,16 +1,19 @@
 using Pkg; Pkg.activate(@__DIR__)
 using SmoothTree, Test, NewickTree, Serialization, StatsBase, Distributions
 using LinearAlgebra
+using Plots, StatsPlots
+default(gridstyle=:dot, legend=false, framestyle=:box,
+        xlim=(-Inf,Inf), ylim=(-Inf,Inf))
 
 # ABC test
 # ========
 # What is this approach? pseudolikelihood? 
 # it does not work
 S = nw"((smo,(((gge,iov),(xtz,dzq)),sgt)),jvs);"
-θ = 1.
+θ = 0.75
 SmoothTree.setdistance!(S, θ)
 model = SmoothTree.MSC(S)
-data = CCD(model, SmoothTree.randsplits(model, 1000))
+data = CCD(model, SmoothTree.randsplits(model, 1000), α=1e-3)
 
 prior = Exponential()
 d = map(1:100000) do iteration
@@ -25,6 +28,7 @@ end
 acc = first.(d) 
 v = last.(d[acc])
 stephist(v, color=:black); vline!([θ])
+# this doesn't work
 
 # ABC
 prior = Exponential()
@@ -32,14 +36,31 @@ d = map(1:10000) do iteration
     x = rand(prior)
     SmoothTree.setdistance!(S, x)
     simm = SmoothTree.MSC(S)
-    sims = CCD(simm, randsplits(simm, 100))
-    d = SmoothTree.kldiv(data, sims, 1e-10)
+    sims = CCD(simm, randsplits(simm, 1000), α=1e-3)
+    d = SmoothTree.symmkldiv(data, sims)
+    #d = SmoothTree.kldiv(data, sims)
     (d, x)
 end
 
-acc = abs.(first.(d)) .< 20
-v = last.(d[acc])
-stephist(v, color=:black); vline!([θ])
+ds = first.(d)
+qs = quantile(ds, [0.05, 0.10, 0.20, 0.5])
+p = vline([θ], color=:black, lw=2.)
+for thresh in reverse(qs)
+    acc = ds .< thresh
+    v = last.(d[acc])
+    density!(v, fill=true, fillalpha=0.3); 
+end
+plot(p, size=(300,200), ylim=(-Inf,Inf), xlim=(-Inf,Inf))
+
+# It works, sometimes? I get good results for θ ∈ [0.5, 1., 2]
+# when using the same data set size for simulations and the same
+# alpha. When using a different alpha, we are way off... Using 5% of
+# the simulations we get a fairly accurate posterior it seems.
+# Also, it does not appear to work with asymmetric KL divergences.
+#
+# This should give an approach which works more generally then Fan &
+# Kubatko, not relying on COAL to compute the distribution under the
+# coalescent.
 
 # multivariate
 S = nw"((smo,(((gge,iov),(xtz,dzq)),sgt)),jvs);"
