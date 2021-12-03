@@ -96,9 +96,6 @@ function setdistance!(S, θ::Number)
     end
 end
 
-# do n `randsplits` simulations
-randsplits(model::MSC, n) = map(_->randsplits(model), 1:n)
-
 # generate a tree from the MSC model, in the form of a set of splits.
 function randsplits(model::MSC{T}) where T
     _, splits = _coalsplits(model.tree, Splits{T}(), model.init)
@@ -134,8 +131,8 @@ function _censoredcoalsplits!(splits, t, lineages)
 end
 
 # construct a CCD object from a set of splits
-function CCD(model::MSC, splits::Vector{Splits{T}}; α=0.) where T
-    ccd = initccd(model, splits[1], α)
+function CCD(model::MSC, splits::Vector{Splits{T}}; α=0., αroot=α) where T
+    ccd = initccd(model, splits[1], α, αroot)
     for x in splits
         addsplits!(ccd, x)
     end
@@ -146,7 +143,7 @@ end
 # quite be shared with the usual CCD constructor based on (gene)
 # trees, the difference being that here we have to make sure it works
 # when a species has multiple leaves.
-function initccd(model::MSC, splits::Splits{T}, α=0.) where T
+function initccd(model::MSC, splits::Splits{T}, α=0., αroot=α) where T
     leaves = collect(keys(model.leafindex))
     lmap = Dict{String,T}()
     for (k,v) in model.leafindex
@@ -158,7 +155,7 @@ function initccd(model::MSC, splits::Splits{T}, α=0.) where T
     cmap = Dict{T,Int64}(l=>0 for (_,l) in lmap)
     smap = Dict{T,Dict{T,Int64}}()
     root = T(sum(values(lmap)))
-    CCD(leaves, lmap, cmap, smap, root, α)
+    CCD(leaves, lmap, cmap, smap, root, αroot, α)
 end
 
 # add a bunch of splits to a CCD

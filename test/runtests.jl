@@ -1,9 +1,10 @@
 using Pkg; Pkg.activate(@__DIR__)
 using SmoothTree, Test, NewickTree
-using BenchmarkTools, Serialization, StatsBase, Distributions
+using StatsBase, Distributions
 
 @testset "SmoothTree tests" begin
-    treesfile = joinpath(@__DIR__, "test/OG0006030.trees")
+    #treesfile = joinpath(@__DIR__, "test/OG0006030.trees")
+    treesfile = joinpath(@__DIR__, "OG0006030.trees")
     trees = readnw.(readlines(treesfile))
     trees = SmoothTree.rootall!(trees)
     ccd = CCD(trees)
@@ -27,7 +28,7 @@ using BenchmarkTools, Serialization, StatsBase, Distributions
     end
 
     @testset "MSC" begin
-        using SmoothTree: randtree, isisomorphic
+        using SmoothTree: randtree, isisomorphic, MSC
         S = nw"(((((A,B),C),(D,E)),(F,(G,H))),O);"
         SmoothTree.setdistance!(S, Inf)
         @test isisomorphic(randtree(MSC(S)), S)
@@ -48,7 +49,7 @@ using BenchmarkTools, Serialization, StatsBase, Distributions
         @test length(trees) == 15
         for (k,v) in trees
             nl(k) = length(getleaves(k))
-            expected = nl(k[1]) == nl(k[2]) ? 0.15 : 0.05
+            expected = nl(k[1]) == nl(k[2]) ? 3/21 : 1/21
             @test expected ≈ v atol=0.01
         end
     end
@@ -73,6 +74,44 @@ using BenchmarkTools, Serialization, StatsBase, Distributions
         @test p ≈ 1.
     end
 
+    @testset "Verify sampler with logpdf/logpdf with sampler" begin
+        #S = nw"((smo,(((gge,iov),(xtz,dzq)),sgt)),jvs);"
+        #SmoothTree.setdistance!(S, 1.)
+        #model = SmoothTree.MSC(S)
+        #data = CCD(model, SmoothTree.randsplits(model, 1000), α=0.001) 
+        #treeprior = CCD(randtree(data, 10000), α=0.)
+        #trees = SmoothTree.ranking(randtree(treeprior, 10000))[1:20]
+        #ls = logpdf.(Ref(treeprior), first.(trees))
+        #ps = last.(trees)
+        #@test all(isapprox(exp.(ls), ps, rtol=0.2))
+        #treeprior = CCD(randtree(data, 10000), α=5000.)
+        #trees = SmoothTree.ranking(randtree(treeprior, 500000))[1:20]
+        #ls = logpdf.(Ref(treeprior), first.(trees))
+        #ps = log.(last.(trees))
+        #@test all(isapprox(exp.(ls), exp.(ps), rtol=0.2))
+        # NOTE: for the above tree we need a large sample to get
+        # accurate estimates of the likelihood, so a bit prohibitive
+        # to take up in the actual test suite
+        for α=[0.1, 0.5, 1., 2.]
+            n = 1000
+            # we get some 'observed data' from MSC simulations
+            S = nw"(((A,B),C),D);"
+            SmoothTree.setdistance!(S, 5.)
+            model = SmoothTree.MSC(S)
+            data = CCD(model, SmoothTree.randsplits(model, 1000), α=0.001) 
+            # we construct a BMP tree prior
+            treeprior = CCD(randtree(data, n), α=α*n)
+            # estimate the likelihood of the 15 trees using simulation
+            trees = SmoothTree.ranking(randtree(treeprior, 100000))
+            # compute the likelihood of the 15 trees algorithmically
+            ls = exp.(logpdf.(Ref(treeprior), first.(trees)))
+            ps = last.(trees)
+            # compare
+            #for i=1:15; @printf "%s %.4f %.4f\n" trees[i][1] trees[i][2] ls[i]; end
+            @test all(isapprox(ls, ps, rtol=0.2))
+        end
+    end
+
     @testset "CCD from MSC sims" begin
         S = nw"((smo,(((gge,iov),(xtz,dzq)),sgt)),jvs);"
         θ = 1.
@@ -81,6 +120,25 @@ using BenchmarkTools, Serialization, StatsBase, Distributions
         data1 = CCD(model, randsplits(model, 10), α=1e-2)
         data2 = CCD(model, randsplits(model, 10), α=1e-2)
         SmoothTree.symmkldiv(data1, data2)
+    end
+
+    @testset "Tree isomorphism" begin
+        t1 = nw"(((((gge,iov),(xtz,dzq)),sgt),smo),jvs);"
+        t2 = nw"((smo,(((gge,iov),(xtz,dzq)),sgt)),jvs);"
+        @test SmoothTree.isisomorphic(t1, t2)
+    end
+
+    @testset "marginal clade size" begin
+        using SmoothTree: cladesize, getcladesbits
+        S = nw"((smo,(((gge,iov),(xtz,dzq)),sgt)),jvs);"
+        # prior distribution sums to one
+        ccd = SmoothTree.initccd(S, UInt8, 10.)  # an empty CCD
+        trees = randtree(ccd, 100000)
+        empirical = [cladesize.(getcladesbits(t)) for t in trees]
+        map(1:7) do k
+            p = length(filter(x->k ∈ x, empirical)) / length(empirical)
+            @test SmoothTree._pcladesize(7,k) ≈ p rtol=0.1
+        end
     end
 
 end

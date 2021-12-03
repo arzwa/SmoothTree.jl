@@ -16,10 +16,11 @@ getmodel(model::MSCModel, ccd::CCD) = MSCModel(model.model(ccd))
 Base.rand(model::MSCModel) = randsplits(model.model)
 
 # input: true gene trees
-S = readnex("docs/rev/sptree-01.nex")[1]
+basedir = "/home/arzwa/dev/SmoothTree"
+S = readnex("$basedir/docs/rev/sptree-01.nex")[1]
 n = SmoothTree.n_internal(S) - 1
-trees = readnex("docs/rev/genetrees-01.nex")[1:100]
-data  = CCD.(trees)
+trees = readnex("$basedir/docs/rev/genetrees-01.nex")[1:100]
+data  = CCD.(trees, α=1e-4)
 last.(sort(collect(countmap(trees)), by=last))
 
 μ = zeros(n)
@@ -48,18 +49,18 @@ plot(p1, p2, size=(500,200), layout=(1,2), bottom_margin=4mm,
 
 # input: inferred gene trees
 using Serialization
-S = readnex("docs/rev/sptree-01.nex")[1]
+S = readnex("$basedir/docs/rev/sptree-01.nex")[1]
 n = SmoothTree.n_internal(S) - 1
 
-trees = map(readdir("docs/rev/ufboot-01/", join=true)) do fname
+trees = map(readdir("$basedir/docs/rev/ufboot-01/", join=true)) do fname
     trees = readnw.(readlines(fname))
     trees = getroot.(SmoothTree.rootall!(trees, "O"))
-    proportionmap(trees)
+    countmap(trees)
 end
 
-serialize("docs/rev/ufboot-01.jls", trees)
+serialize("$basedir/docs/rev/ufboot-01.jls", trees)
 
-data = map(CCD, trees)
+data = map(x->CCD(x, α=1e-4), trees)
 
 μ = zeros(n)
 Σ = diagm(fill(2., n)) 
@@ -67,10 +68,10 @@ M = 100000
 accfun(ϵ=1.) = (x,y)->log(ϵ*rand()) < logpdf(x,y)
 model = MSCModel(SmoothTree.MSC(S))
 N = 500
-alg = GaussianEPABC(data[1:N], model, accfun(0.1), μ, Σ, M, α=0.2)
+alg = GaussianEPABC(data[1:N], model, accfun(.1), μ, Σ, M, α=0.2)
 
-trace = ep!(alg, 3)
-trace = [trace; ep!(alg, 2)]
+trace = ep!(alg, 1)
+trace = [trace; ep!(alg, 1)]
 
 using Plots, StatsPlots, LaTeXStrings, Measures
 Plots.default(legend=false, gridstyle=:dot, framestyle=:box)
@@ -83,8 +84,9 @@ p2 = plot(grid=false, legend=false, xlabel=L"\log\theta", ylabel="density")
 for i=1:n
     plot!(Normal(m[i], v[i]))
 end
-timetree = readnex("docs/rev/sptree-01.nex")[1]
-b = Dict(id(n)=>distance(n) for n in postwalk(model.model.tree))
+timetree = readnex("$basedir/docs/rev/sptree-01.nex")[1]
+coaltree = model.model.tree
+b = Dict(id(n)=>distance(n) for n in postwalk(coaltree))
 xs = map(zip(postwalk(timetree), postwalk(coaltree))) do (node, c)
     if isleaf(node) || isroot(node) || isroot(parent(node))
         (NaN, NaN)

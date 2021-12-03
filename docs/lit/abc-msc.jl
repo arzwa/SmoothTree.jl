@@ -35,13 +35,14 @@ end
 
 # Plot the densities for different ABC kernel widths
 ds = first.(allsims)
-qs = quantile(ds, [0.05, 0.10, 0.20, 0.5, 1.])
+qs = quantile(ds, [0.05, 0.10, 0.20, 0.5])
 p = vline([θ], color=:black, lw=2.)
+plot!(prior, color=:black)
+vline!([mean(prior)], lw=2, ls=:dot, color=:black)
 for (i,h) in enumerate(reverse(qs))
     acc = ds .< h
     v = last.(allsims[acc])
-    i == 1 ? density!(v, color=:black) : 
-        density!(v, fill=true, fillalpha=0.1); 
+    density!(v, fill=true, fillalpha=0.1); 
 end
 plot(p, size=(300,200), ylim=(-Inf,Inf), xlim=(0.,5))
 
@@ -103,10 +104,14 @@ model = SmoothTree.MSC(S)
 data = CCD(model, SmoothTree.randsplits(model, n), α=1/n)
 
 # 3.2 Generate a prior for the species tree
-# We could sample a bunch of trees from the gene tree data (summarzied
+# We could sample a bunch of trees from the gene tree data (summarized
 # as CCD), and use a fairly large α to get a suitable prior.
-treeprior = CCD(randtree(data, 1000), α=0.5)
+treeprior = CCD(randtree(data, 10000), α=5000.)
 θprior = MvNormal(zeros(m), 1.)
+
+# examine the prior
+priorsample = SmoothTree.ranking(randtree(treeprior, 10000))
+sticks(last.(priorsample), xscale=:log10, color=:black, lw=5)
 
 # 3.3 ABC based inference
 nsims = 100000
@@ -123,16 +128,21 @@ allsims = map(1:nsims) do iteration
 end
 
 ds = first.(allsims)
-qs = quantile(ds, [0.05, 0.10, 0.20, 1.])
+qs = quantile(ds, [0.01, 0.05, 0.10, 0.20, 1.])
+density(ds, color=:black); vline!(qs, ls=:dot, lw=2, color=:black)
 
 map(qs) do q
     sims = filter(x->x[1] < q, allsims)
     trees = proportionmap(getindex.(sims, 2))
     sorted = sort(collect(trees), by=last, rev=true)
     t, p = first(sorted)
+    p = round(p, digits=3)
     vs = round.(last.(sorted), digits=4)
-    @info "$(isisomorphic(t, S)), P = $p $(length(sims)) $(vs[1:5])"
+    maptree = nwstr(t, dist=false)
+    @info "$(isisomorphic(t, S)), P = $p $(length(sims)) $maptree"
 end
 
-
-
+# The space of trees seems to be too large to work with a prior which
+# is too diffuse. We see some strange things, sometimes a slight
+# difference in the prior may lead to a very different posterior
+# distribution? Also the KL divergence histogram looks strange.

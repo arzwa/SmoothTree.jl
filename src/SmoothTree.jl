@@ -17,5 +17,8 @@ include("nni.jl")
 _spname(x::String) = string(split(x, "_")[1])
 _spname(n::Node) = _spname(name(n))
 
+# ranking
+ranking(xs) = sort(collect(proportionmap(xs)), by=last, rev=true)
+
 end # module
 

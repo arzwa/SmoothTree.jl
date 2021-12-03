@@ -5,25 +5,62 @@ using Plots, StatsPlots
 default(gridstyle=:dot, legend=false, framestyle=:box,
         xlim=(-Inf,Inf), ylim=(-Inf,Inf))
 
-# ABC test
-# ========
-# What is this approach? pseudolikelihood? 
-# it does not work
+
+# Synthetic likelihood approach
 S = nw"((smo,(((gge,iov),(xtz,dzq)),sgt)),jvs);"
 θ = 0.75
 SmoothTree.setdistance!(S, θ)
 model = SmoothTree.MSC(S)
-data = CCD(model, SmoothTree.randsplits(model, 1000), α=1e-3)
+trees = SmoothTree.randtree(model, 1000)
+data = countmap(trees)
+
+mutable struct UvMH{T,D,A,B,V}
+    data::D
+    prior::A
+    proposal::B
+    θ::T
+    p::T
+    S::V
+end
+
+function mhabcstep!(kernel::UvMH, nsims=10000, α=1e-4)
+    @unpack data, θ, p, proposal, prior, S = kernel
+    θ_ = θ + rand(proposal)
+    θ_ < 0. && return kernel.θ, kernel.p
+    SmoothTree.setdistance!(S, θ_)
+    simm = SmoothTree.MSC(S)
+    ccd = CCD(simm, randsplits(simm, nsims), α=α)
+    l_ = logpdf(ccd, data)
+    p_ = l_ + logpdf(prior, θ_)
+    @info "θ=$θ,p=$p to θ=$θ_,p=$p_"
+    if log(rand()) < p_ - p 
+        kernel.θ = θ_
+        kernel.p = p_
+    end
+    return kernel.θ, kernel.p
+end
+
+# need *a lot* of simulations to get some mixing...
+# it gets stuck easily... But it gets to reasonable values...
+kernel = UvMH(data, Exponential(), Normal(0,0.1), exp(randn()), -Inf, S)
+chain = map(x->mhabcstep!(kernel, 1e6, 1e-6), 1:100)
+
+plot(first.(chain)[10:end])
+
+
+
 
 prior = Exponential()
-d = map(1:100000) do iteration
+d = map(1:1000) do iteration
     x = rand(prior)
     SmoothTree.setdistance!(S, x)
     simm = SmoothTree.MSC(S)
-    t = randsplits(simm)
-    l = logpdf(data, t)
-    (log(rand()) < l, l, x)
+    ccd = CCD(simm, randsplits(simm, 1000), α=1e-3)
+    l = logpdf(ccd, data)
+    (l, x)
 end
+
+histogram(first.(d))
 
 acc = first.(d) 
 v = last.(d[acc])
