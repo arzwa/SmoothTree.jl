@@ -13,7 +13,7 @@ SmoothTree.setdistance!(S, 1.)
 model = MSC(S)
 
 # We obtain a CCD based on 1000 random gene trees from the MSC
-ccd1 = CCD(model, randsplits(model, 10000), α=1e-3)
+ccd1 = CCD(model, randsplits(model, 10000), α=1/63)
 ccd2 = CCD(model, randsplits(model, 10000), α=0.)
 
 # We obtain an empirical distribution over gene trees under the MSC by
@@ -32,10 +32,12 @@ map([ccd1, ccd2]) do ccd
     k = length(filter(x->isfinite(x[2]), probs))
     @info "$k/$(length(ref)) trees with non-zero support in CCD"
     scatter(probs, color=:lightgray, size=(310,300)); 
-    plot!(x->x, color=:black, xlabel="SRF (n=10⁷)", ylabel="CCD (n=10⁴)") 
+    plot!(x->x, color=:black, xlabel="SRF (n=10⁷)", ylabel="CCD (n=10⁴)", 
+          ls=:dot, xlim=(-7.5,0)) 
 end |> x->plot(x..., size=(620, 300))
 
-#savefig("docs/img/2021-11-26-ccd-msc.pdf")
+savefig("docs/img/2021-12-04-ccd-msc.pdf")
+savefig("/home/arzwa/vimwiki/build/img/abc-msc/2021-12-04-ccd-msc.png")
 
 # It appears that the CCD captures the MSC induced distribution over
 # tree topologies reasonably well.

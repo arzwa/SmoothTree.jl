@@ -6,6 +6,6 @@ function rootall!(trees)
 end
 
 function rootall!(trees, leaf)
-    f = x->NewickTree.set_outgroup!(x, leaf)
+    f = x->getroot(NewickTree.set_outgroup!(x, leaf))
     map(f, trees)
 end

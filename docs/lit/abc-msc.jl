@@ -12,6 +12,7 @@ S = nw"((smo,(((gge,iov),(xtz,dzq)),sgt)),jvs);"
 θ = 0.5
 SmoothTree.setdistance!(S, θ)
 model = SmoothTree.MSC(S)
+trees = randtree(model, n)
 data = CCD(model, SmoothTree.randsplits(model, n), α=1/n)
 
 # 1.2 ABC based inference
@@ -22,10 +23,10 @@ allsims = map(1:nsims) do iteration
     x = rand(prior)
     SmoothTree.setdistance!(S, x)
     simm = SmoothTree.MSC(S)
-    sims = CCD(simm, randsplits(simm, simsize), α=1/simsize)
-    #d = SmoothTree.symmkldiv(data, sims)
+    sims = CCD(simm, randsplits(simm, simsize), α=1/63)
+    d = SmoothTree.symmkldiv(data, sims)
     #d = SmoothTree.kldiv(sims, data)
-    d = SmoothTree.kldiv(data, sims)
+    #d = SmoothTree.kldiv(data, sims)
     (d, x)
 end
 # it seems to work best with kldiv(data, sims), which makes sense, as
@@ -57,6 +58,7 @@ m = SmoothTree.n_internal(S)
 θ = rand([0.5, 1., 1.5, 2.5], m)
 SmoothTree.setdistance_internal!(S, θ)
 model = SmoothTree.MSC(S)
+trees = randtree(model, 1000)
 data = CCD(model, SmoothTree.randsplits(model, n), α=1/n)
 
 # 2.2 ABC inference
@@ -76,25 +78,89 @@ end
 # Plot the densities
 ds = first.(allsims)
 xs = permutedims(hcat(last.(allsims)...))
-qs = quantile(ds, [0.05, 0.10, 0.20, 1.])
+qs = quantile(ds, [0.01, 0.05, 0.10, 1.])
 map(1:m) do k
     p = vline([log(θ[k])], color=:black, lw=2.)
     for (i, h) in enumerate(reverse(qs))
         acc = ds .< h
         v = xs[acc,k]
         i == 1 ? density!(v, color=:black) : 
-            density!(v, fill=true, fillalpha=0.3); 
+            density!(v, fill=true, fillalpha=0.2); 
     end
-    plot(p, ylim=(0,1))#, xlim=(0,8))
-end |> x->plot(x..., layout=(1,5), size=(950,150), bottom_margin=4mm)
+    plot(p, ylim=(0,1), xlabel=L"\log\theta", ylabel= k==1 ? L"p" : "")#, xlim=(0,8))
+end |> x->plot(x..., layout=(1,5), size=(950,150), bottom_margin=6mm, left_margin=3mm)
 
 # It seems to work, but is clearly more challenging. More simulations
 # obviously help, more data (10⁴ instead of 10³) does not seem to
 # matter that much... 
 
 
-# 3. Species tree inference
-# 3.1 Simulated data
+# 3. ABC species tree, univariate
+using SmoothTree: isisomorphic
+n = 1000  # data set size (number of loci)
+S = nw"((smo,(((gge,iov),(xtz,dzq)),sgt)),jvs);"
+m = SmoothTree.n_internal(S)
+θ = 0.75
+SmoothTree.setdistance!(S, θ)
+model = SmoothTree.MSC(S)
+trees = randtree(model, 1000)
+data = CCD(trees, α=1/63)
+
+# 3.2 Generate a prior for the species tree
+# We could sample a bunch of trees from the gene tree data (summarized
+# as CCD), and use a fairly large α to get a suitable prior.
+# For a 7 taxon phylogeny, α=1 is like seeing ~ 63 uniform trees
+treeprior = CCD(trees, α=10.)
+θprior = Exponential()
+
+# examine the prior
+priorsample = SmoothTree.ranking(randtree(treeprior, 10000))
+sticks(last.(priorsample), xscale=:log10, color=:black, lw=5)
+
+# 3.3 ABC based inference
+nsims = 100000
+simsize = 100  # size of simulated data set
+allsims = map(1:nsims) do iteration
+    T = randtree(treeprior)
+    x = rand(θprior)
+    SmoothTree.setdistance!(T, x)
+    simm = SmoothTree.MSC(T)
+    sims = CCD(simm, randsplits(simm, simsize), α=1/63)
+    #d = SmoothTree.symmkldiv(data, sims)
+    d = SmoothTree.kldiv(data, sims)
+    (d, T, x)
+end
+
+ds = first.(allsims)
+qs = quantile(ds, [0.01, 0.05, 0.10, 0.20, 1.])
+density(ds, color=:black); vline!(qs, ls=:dot, lw=2, color=:black)
+
+map(qs) do q
+    sims = filter(x->x[1] < q, allsims)
+    trees = proportionmap(getindex.(sims, 2))
+    sorted = sort(collect(trees), by=last, rev=true)
+    t, p = first(sorted)
+    p = round(p, digits=3)
+    vs = round.(last.(sorted), digits=4)
+    maptree = nwstr(t, dist=false)
+    @info "$(isisomorphic(t, S)), P = $p $(length(sims)) $maptree"
+end
+
+ds = first.(allsims)
+qs = quantile(ds, [0.005, 0.05, 0.1, 0.5])
+p = vline([θ], color=:black, lw=2.)
+plot!(θprior, color=:black)
+vline!([mean(prior)], lw=2, ls=:dot, color=:black)
+for (i,h) in enumerate(reverse(qs))
+    acc = ds .< h
+    v = last.(allsims[acc])
+    density!(v, fill=true, fillalpha=0.1); 
+end
+plot(p, size=(300,200), ylim=(-Inf,Inf), xlim=(0.,5))
+
+
+# 4. Species tree inference, multivariate 
+# 4.1 Simulated data
 n = 1000  # data set size (number of loci)
 S = nw"((smo,(((gge,iov),(xtz,dzq)),sgt)),jvs);"
 m = SmoothTree.n_internal(S)
@@ -103,17 +169,17 @@ SmoothTree.setdistance_internal!(S, θ)
 model = SmoothTree.MSC(S)
 data = CCD(model, SmoothTree.randsplits(model, n), α=1/n)
 
-# 3.2 Generate a prior for the species tree
+# 4.2 Generate a prior for the species tree
 # We could sample a bunch of trees from the gene tree data (summarized
 # as CCD), and use a fairly large α to get a suitable prior.
-treeprior = CCD(randtree(data, 10000), α=5000.)
+treeprior = CCD(randtree(data, 1000), α=10.)
 θprior = MvNormal(zeros(m), 1.)
 
 # examine the prior
 priorsample = SmoothTree.ranking(randtree(treeprior, 10000))
 sticks(last.(priorsample), xscale=:log10, color=:black, lw=5)
 
-# 3.3 ABC based inference
+# 4.3 ABC based inference
 nsims = 100000
 simsize = 100  # size of simulated data set
 allsims = map(1:nsims) do iteration

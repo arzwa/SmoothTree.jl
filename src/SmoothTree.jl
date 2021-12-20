@@ -7,9 +7,10 @@ export CCD, MSC, randtree, randsplits, setdistance!, setdistance_internal!
 
 include("utils.jl")
 include("ccd.jl")
+include("bmp.jl")
 include("msc.jl")
 include("nni.jl")
-#include("epabc.jl")
+include("epabc.jl")
 #include("mulccd.jl")
 #include("ep-abc-msc.jl")
 
@@ -19,6 +20,9 @@ _spname(n::Node) = _spname(name(n))
 
 # ranking
 ranking(xs) = sort(collect(proportionmap(xs)), by=last, rev=true)
+
+# remove branch lengths
+topologize!(tree) = for n in postwalk(tree); n.data.distance = NaN; end
 
 end # module
 

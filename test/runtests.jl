@@ -3,8 +3,8 @@ using SmoothTree, Test, NewickTree
 using StatsBase, Distributions
 
 @testset "SmoothTree tests" begin
-    #treesfile = joinpath(@__DIR__, "test/OG0006030.trees")
-    treesfile = joinpath(@__DIR__, "OG0006030.trees")
+    treesfile = joinpath(@__DIR__, "test/OG0006030.trees")
+    #treesfile = joinpath(@__DIR__, "OG0006030.trees")
     trees = readnw.(readlines(treesfile))
     trees = SmoothTree.rootall!(trees)
     ccd = CCD(trees)
@@ -39,9 +39,7 @@ using StatsBase, Distributions
     end
 
     @testset "Prior/regularization" begin
-        using SmoothTree: initccd
-        S = nw"(((A,B),C),D);"
-        ccd = initccd(S, UInt8, 1.)  # an empty CCD
+        ccd = CCD(["A","B","C","D"], α=1.)
         @test ccd.cmap[maximum(keys(ccd.cmap))] == 0
         trees = proportionmap(randtree(ccd, 10000))
         # there should be 15 trees, three balanced ones and 12
@@ -59,7 +57,7 @@ using StatsBase, Distributions
         using SmoothTree: initccd
         S = nw"(((A,B),C),D);"
         # prior distribution sums to one
-        ccd = initccd(S, UInt8, 1.)  # an empty CCD
+        ccd = CCD(["A","B","C","D"], α=1.)  # an empty CCD
         trees = unique(randtree(ccd, 10000))
         @test length(trees) == 15
         p = mapreduce(tree->exp(logpdf(ccd, tree)), +, trees)
@@ -75,23 +73,6 @@ using StatsBase, Distributions
     end
 
     @testset "Verify sampler with logpdf/logpdf with sampler" begin
-        #S = nw"((smo,(((gge,iov),(xtz,dzq)),sgt)),jvs);"
-        #SmoothTree.setdistance!(S, 1.)
-        #model = SmoothTree.MSC(S)
-        #data = CCD(model, SmoothTree.randsplits(model, 1000), α=0.001) 
-        #treeprior = CCD(randtree(data, 10000), α=0.)
-        #trees = SmoothTree.ranking(randtree(treeprior, 10000))[1:20]
-        #ls = logpdf.(Ref(treeprior), first.(trees))
-        #ps = last.(trees)
-        #@test all(isapprox(exp.(ls), ps, rtol=0.2))
-        #treeprior = CCD(randtree(data, 10000), α=5000.)
-        #trees = SmoothTree.ranking(randtree(treeprior, 500000))[1:20]
-        #ls = logpdf.(Ref(treeprior), first.(trees))
-        #ps = log.(last.(trees))
-        #@test all(isapprox(exp.(ls), exp.(ps), rtol=0.2))
-        # NOTE: for the above tree we need a large sample to get
-        # accurate estimates of the likelihood, so a bit prohibitive
-        # to take up in the actual test suite
         for α=[0.1, 0.5, 1., 2.]
             n = 1000
             # we get some 'observed data' from MSC simulations

@@ -40,18 +40,24 @@ nl(X::CCD) = length(X.leaves)
 nc(X::CCD) = length(X.cmap)
 
 function Base.show(io::IO, X::CCD{T}) where T
-    write(io, "CCD{$T}(n=$(nl(X)), Γ=$(X.root)))")
+    write(io, "CCD{$T}(n=$(nl(X)), Γ=$(X.root))")
 end
 
 function showclades(X::CCD)
     sort([(k, bitstring(k), v) for (k,v) in X.cmap])
 end
 
+# leaf names
+NewickTree.getleaves(x::CCD) = collect(keys(x.lmap))
+
 # check if some bitclade represents a leaf
 isleafclade(clade) = count_ones(clade) == 1
 
 # get the number of leaves in a clade
 cladesize(clade) = count_ones(clade)
+
+# get the root clade for n leaves
+rootclade(n, T=UInt16) = T(2^n - 1) 
 
 # obtain the clade leaf names from its Int representation
 getclade(ccd::CCD, clade) = ccd.leaves[Bool.(digits(clade, base=2, pad=nl(ccd)))]
@@ -65,7 +71,7 @@ uweights(xs) = fill(1/length(xs), length(xs))
 
 # from a vector of trees
 function CCD(trees; α=0., αroot=α, T=UInt16)
-    ccd = initccd(trees[1], T, α)
+    ccd = initccd(trees[1], T, α, αroot)
     for tree in trees
         ccd = addtree!(ccd, tree)
     end
@@ -78,10 +84,16 @@ CCD(trees::AbstractDict; kwargs...) = CCD(collect(trees); kwargs...)
 # For a single tree
 CCD(tree::Node; kwargs...) = CCD([tree]; kwargs...)
 
-# initialize a ccd, either from a tree or a pair tree => count
-initccd(tpair, args...) = initccd(first(tpair), args...)  
-function initccd(tree::Node, T=UInt16, α=0., αroot=α)
-    lmap = leafclades(tree, T)
+# get a uniform BMP distribution on a certain leaf set
+CCD(leaves::Vector{String}; α=1., αroot=α, T=UInt16) = initccd(leaves, T, α, αroot)
+
+# initialize a ccd, either from a tree, from a pair tree => count or
+# from a leafset
+initccd(tpair::Pair, args...) = initccd(first(tpair), args...)  
+initccd(tree::Node, args...) = initccd(name.(getleaves(tree)), args...)
+
+function initccd(leaves, T=UInt16, α=0., αroot=α)
+    lmap = leafclades(leaves, T)
     cmap = Dict{T,Int64}(l=>0 for (_,l) in lmap)
     smap = Dict{T,Dict{T,Int64}}()
     kv = collect(lmap)
@@ -95,9 +107,8 @@ function initccd(tree::Node, T=UInt16, α=0., αroot=α)
 end
 
 # assign leaf clade numbers (base 2)
-function leafclades(tree, T=UInt16)
-    l = name.(getleaves(tree))
-    d = Dict{String,T}(k=>one(T) << T(i-1) for (i,k) in enumerate(l))
+function leafclades(leaves, T=UInt16)
+    d = Dict{String,T}(k=>one(T) << T(i-1) for (i,k) in enumerate(leaves))
     return d
 end
 
@@ -373,6 +384,7 @@ function kldiv(p::CCD, q::CCD)
     # in case 4, the p/q ratio becomes 1, so they can be ignored
     #for (γ, dict) in p.smap
     for γ in union(keys(p.cmap), keys(q.cmap))
+        isleafclade(γ) && continue
         if inccd(p, γ)  # observed in (p and q) or p
             # this is for all contributing splits of an observed γ
             d = 0.

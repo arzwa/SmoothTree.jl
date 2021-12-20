@@ -1,6 +1,6 @@
 using Pkg; Pkg.activate(@__DIR__)
 using SmoothTree, Test, NewickTree, Serialization, StatsBase, Distributions
-using LinearAlgebra
+using LinearAlgebra, Parameters, Printf
 using Plots, StatsPlots
 default(gridstyle=:dot, legend=false, framestyle=:box,
         xlim=(-Inf,Inf), ylim=(-Inf,Inf))
@@ -11,7 +11,7 @@ S = nw"((smo,(((gge,iov),(xtz,dzq)),sgt)),jvs);"
 θ = 0.75
 SmoothTree.setdistance!(S, θ)
 model = SmoothTree.MSC(S)
-trees = SmoothTree.randtree(model, 1000)
+trees = SmoothTree.randtree(model, 200)
 data = countmap(trees)
 
 mutable struct UvMH{T,D,A,B,V}
@@ -32,7 +32,7 @@ function mhabcstep!(kernel::UvMH, nsims=10000, α=1e-4)
     ccd = CCD(simm, randsplits(simm, nsims), α=α)
     l_ = logpdf(ccd, data)
     p_ = l_ + logpdf(prior, θ_)
-    @info "θ=$θ,p=$p to θ=$θ_,p=$p_"
+    @printf "θ=%5.3f θ'=%5.3f π=%10.3f π'=%10.3f\n" θ θ_ p p_
     if log(rand()) < p_ - p 
         kernel.θ = θ_
         kernel.p = p_
@@ -43,9 +43,11 @@ end
 # need *a lot* of simulations to get some mixing...
 # it gets stuck easily... But it gets to reasonable values...
 kernel = UvMH(data, Exponential(), Normal(0,0.1), exp(randn()), -Inf, S)
-chain = map(x->mhabcstep!(kernel, 1e6, 1e-6), 1:100)
+chain1 = map(x->mhabcstep!(kernel, 3e4, 10.), 1:1000)
+chain2 = map(x->mhabcstep!(kernel, 3e4, 10.), 1:1000)
 
-plot(first.(chain)[10:end])
+plot(first.(chain1)[100:end])
+plot!(first.(chain2)[100:end])
 
 
 

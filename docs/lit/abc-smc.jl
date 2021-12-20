@@ -7,7 +7,7 @@ default(gridstyle=:dot, legend=false, framestyle=:box,
 
 n = 1000  # data set size (number of loci)
 S = nw"((smo,(((gge,iov),(xtz,dzq)),sgt)),jvs);"
-θ = 1.
+θ = 2.
 SmoothTree.setdistance!(S, θ)
 model = SmoothTree.MSC(S)
 data = CCD(model, SmoothTree.randsplits(model, n), α=1/n)
@@ -78,10 +78,10 @@ function showtop(particles, n=10)
 end
 
 ϵ = 10.
-particles = initsis(data, treeprior, θprior, 1000, ϵ, 100)
-particles = sis_it(particles, data, treeprior, θprior, 1000, ϵ, 100)
+particles = initsis(data, treeprior, θprior, 5000, ϵ, 100)
+particles = sis_it(particles, data, treeprior, θprior, 5000, ϵ, 100)
 
-for i=1:50
+for i=1:30
     ϵ *= 0.99
     @show ϵ
     particles = sis_it(particles, data, treeprior, θprior, 1000, ϵ, 100)
