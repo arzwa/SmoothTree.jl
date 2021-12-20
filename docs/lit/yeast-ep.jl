@@ -4,13 +4,33 @@ using StatsBase, Distributions
 using Serialization
 data_ = deserialize("docs/data/yeast-rokas/ccd-ufboot.jls")
 trees = readnw.(readlines("docs/data/yeast.trees"))
+taxon_map = SmoothTree.taxon_map(name.(getleaves(trees[1])))
+invmap = SmoothTree.inverse(taxon_map)
 
 Ψprior = SmoothTree.NatBMP(CCD(trees, α=1.))
 smple  = SmoothTree.ranking(randtree(SmoothTree.MomBMP(Ψprior), 10000))
 
 θprior = SmoothTree.mom2nat(log(1.5), 2)
 
+data  = CCD.(data_, α=0.01 * length(data_))
+model = SmoothTree.MSCModel(Ψprior, θprior, taxon_map)
+alg = SmoothTree.EPABC(data, model, M=10000, λ=1., α=0.000001)
 
+trace = map(i->SmoothTree.ep_iteration!(alg, i), 1:length(data))
+
+mtrace = map(x->SmoothTree.MomBMP(x.Ψ), trace)
+
+traces = map(ultimate_clades[2:end]) do clade
+    splits = keys(mtrace[end].smap[clade].splits)
+    xs = map(mtrace) do bmp
+        [haskey(bmp.smap[clade].splits, x) ? 
+         bmp.smap[clade].splits[x] : bmp.smap[clade].η0 for x in splits]
+    end 
+    X = permutedims(hcat(xs...))
+    plot(X, legend=false, yscale=:log10, framestyle=:box,
+         gridstyle=:dot, title="clade $(bitstring(clade)[end-7:end])",
+         title_loc=:left, titlefont=7)
+end |> x->plot(x...)
 
 # -------------------------------------------------------------------
 taxon_map = SmoothTree.taxon_map(name.(getleaves(trees[1])))

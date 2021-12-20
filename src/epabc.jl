@@ -16,19 +16,20 @@ struct BranchModel{T,V}
 end
 
 # initialize an empty branchmodel object
-BranchModel(x::BMP{T}, prior) where T = BranchModel(Dict{T,Vector{Float64}}(), prior)
+BranchModel(x::NatBMP{T}, prior) where T = BranchModel(Dict{T,Vector{Float64}}(), prior)
 
 struct MSCModel{T,V,W}
-    Ψ::BMP{T,V}  # species tree distribution approximation
+    Ψ::NatBMP{T,V}  # species tree distribution approximation
     q::BranchModel{T,W}  # branch parameter distribution approximation
     m1::Dict{T,String}  # taxon map BMP => species tree labels
     m2::Dict{String,T}  # taxon map BMP => species tree labels
 end
 
+taxon_map(leaves, T=UInt16) = Dict(T(2^i)=>leaves[i+1] for i=0:length(leaves)-1)
 inverse(d) = Dict(v=>k for (k,v) in d)
 
 # initialize a MSCModel
-MSCModel(x::BMP, θprior, m) = MSCModel(x, BranchModel(x, θprior), m, inverse(m))
+MSCModel(x::NatBMP, θprior, m) = MSCModel(x, BranchModel(x, θprior), m, inverse(m))
 
 # the main EP struct
 mutable struct EPABC{X,M}
@@ -37,11 +38,12 @@ mutable struct EPABC{X,M}
     sites::Vector{M}
     M    ::Int
     λ    ::Float64  # for damped update...
+    α    ::Float64  # Dirichlet-BMP parameter for 'moment matching'
 end
 
-function EPABC(data, model::T; M=10000, λ=1.) where T
+function EPABC(data, model::T; M=10000, λ=1., α=0.1) where T
     sites = Vector{T}(undef, length(data))
-    EPABC(data, model, sites, M, λ)
+    EPABC(data, model, sites, M, λ, α)
 end
 
 # 1. We need a method to form the cavity density
@@ -94,43 +96,16 @@ function gaussian_nat(η1, η2)
     Normal(μ, σ)
 end
 
-function normalize!(bmp)
-    for (k,d) in bmp.smap
-        Z = sum(values(d))
-        for (s,v) in d
-            d[s] /= Z
-        end
-    end
-end
-
 # 3. We need a method to update the full approximation by moment
 # matching. We need something like the BranchModel storing for each
 # clade in the accepted simulations the count for that clade, and its
 # mean and squared parameter value
-function updated_model(accepted_trees, model, λ)
-    Ψ = newbmp(accepted_trees, model, λ)
-    q = newbranches(Ψ, accepted_trees, model, λ)
-    MSCModel(Ψ, q, model.m1, model.m2)
-    #MSCModel(Ψ, model.q, model.m1, model.m2)
-end
-
-function newbmp(accepted_trees, model, λ)
-    Ψ = fitbmp(accepted_trees, model.m2)
-    # damping **assuming full support is represented**
-    for (k,d) in model.Ψ.smap
-        for (s, p) in d
-            if !haskey(Ψ.smap, k)
-                Ψ.smap[k] = Dict(s=>(1-λ)*p)
-            elseif !haskey(Ψ.smap[k], s)
-                Ψ.smap[k][s] = (1-λ)*p
-            else
-                Ψ.smap[k][s] *= λ
-                Ψ.smap[k][s] += (1-λ)*p
-            end
-        end
-    end
-    normalize!(Ψ)
-    return Ψ
+function updated_model(accepted_trees, model, λ, α)
+    M = NatBMP(CCD(accepted_trees, α=α))
+    Ψ = convexcombination(M, model.Ψ, λ)
+    #q = newbranches(Ψ, accepted_trees, model, λ)
+    #MSCModel(Ψ, q, model.m1, model.m2)
+    MSCModel(Ψ, model.q, model.m1, model.m2)
 end
 
 function newbranches(Ψ, accepted_trees, model, λ)
@@ -181,8 +156,8 @@ function ep_iteration!(alg, i, minacc=1)
     nacc = length(accepted)
     @show nacc
     nacc < minacc && return alg.model
-    model_ = updated_model(last.(accepted), model, alg.λ)
-    #alg.sites[i] = new_site(model_, cavity) 
+    model_ = updated_model(last.(accepted), model, alg.λ, alg.α)
+    alg.sites[i] = new_site(model_, cavity) 
     alg.model = model_
 end
 

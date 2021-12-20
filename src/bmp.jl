@@ -116,6 +116,10 @@ end
 # randtree for moment parameters
 randtree(model::MomBMP) = _randwalk(Node(model.root), model)
 
+# randtree for natural parameter SparseSplits  # FIXME?
+randtree(model::NatBMP) = randtree(MomBMP(model))
+randtree(model::NatBMP, n) = randtree(MomBMP(model), n)
+
 # recursion for randtree
 function _randwalk(node, model::MomBMP)
     clade = id(node)
@@ -146,9 +150,9 @@ function randsplit(x::SparseSplits, γ)
         return splits[i]
     else  # rejection sampler...
         δ = randsplit(γ)
-        while δ ∈ splits
-            δ = randsplit(γ)
-        end
+        #while δ ∈ splits
+        #    δ = randsplit(γ)
+        #end
         return δ
     end
 end
@@ -209,9 +213,4 @@ function _convexcombination(x::SparseSplits{T,V}, λ) where {T,V}
     d = Dict(k=>λ*η for (k,η) in x.splits)
     SparseSplits(d, x.n, x.k, λ*x.η0, x.ref) 
 end
-
-# TODO
-# randtree for natural parameter SparseSplits
-
-
 
