@@ -53,6 +53,9 @@ NewickTree.getleaves(x::CCD) = collect(keys(x.lmap))
 # check if some bitclade represents a leaf
 isleafclade(clade) = count_ones(clade) == 1
 
+# check if cherry clade
+ischerry(clade) = count_ones(clade) == 2
+
 # get the number of leaves in a clade
 cladesize(clade) = count_ones(clade)
 

@@ -5,6 +5,14 @@ using Serialization
 data_ = deserialize("docs/data/yeast-rokas/ccd-ufboot.jls")
 trees = readnw.(readlines("docs/data/yeast.trees"))
 
+Ψprior = SmoothTree.NatBMP(CCD(trees, α=1.))
+smple  = SmoothTree.ranking(randtree(SmoothTree.MomBMP(Ψprior), 10000))
+
+θprior = SmoothTree.mom2nat(log(1.5), 2)
+
+
+
+# -------------------------------------------------------------------
 taxon_map = SmoothTree.taxon_map(name.(getleaves(trees[1])))
 invmap = SmoothTree.inverse(taxon_map)
 
