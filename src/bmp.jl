@@ -16,10 +16,16 @@
 # tree topologies constrained by observed marginal split frequencies
 # (cfr. Szollosi)).
 
-# We assume that unrepresented probability mass is distributed
-# uniformly over non-represented splits.
+# A potentially unnormalized BMP in natural parameter space: this
+# means we have to maintain for each clade a distribution over splits
+# and normalization factor. It is probably easiest to maintain these
+# in separate fields (not using a special key in the dict)
+# We mainly want to be able to sample from the unnormalized BMP and to
+# efficiently construct the cavity distribution and convex
+# combinations of BMPs.
 struct BMP{T,V}
     smap::Dict{T,Dict{T,V}}
+    zmap::Dict{T,Tuple{Float64,Float64,Int64}}   # Z, p0 and k
     root::T
 end
 
@@ -27,21 +33,27 @@ end
 UniformBMP(n, T=UInt16) = BMP(Dict{T,Dict{T,Float64}}(), rootclade(n, T)) 
 
 # mean of a Dirichlet-BMP is a BMP
-function Distributions.mean(x::CCD)
-    smap = Dict(γ=>_splitfun(γ, d, x.α) for (γ, d) in x.smap)
-    return BMP(smap, x.root)
+function Distributions.mean(x::CCD{T}) where T
+    zmap = Dict{T,Tuple{Float64,Float64,Int64}}()
+    smap = Dict{T,Dict{T,Float64}}()
+    map(collect(x.smap)) do (γ, d)
+        dd, zs = _splitfun(γ, d, x.α)
+        zmap[γ] = zs
+        smap[γ] = dd 
+    end
+    return BMP(smap, zmap, x.root)
 end
 
 function _splitfun(γ, d, α)
     n = _ns(cladesize(γ))
     k = length(d)
     N = sum(values(d))
-    denom = α * n + N
+    Z = log(α * n + N)
+    # represented splits
+    dd = Dict(c=>log(α + v) for (c, v) in d) 
     # unrepresented: 
-    p0 = n - k == 0 ? 0. : α / denom
-    dd = Dict(c=>(α + v)/denom for (c, v) in d) 
-    dd[0] = p0
-    return dd
+    p = n - k == 0 ? 0 : log(α) - Z
+    return dd, (Z, p, k)
 end
 
 # Base extensions
@@ -52,14 +64,8 @@ Base.haskey(model::BMP{T}, γ::T, δ::T) where T =
 Base.getindex(model::BMP{T}, γ::T) where T = model.smap[γ]
 
 # deal with sparsely represented BMPs
-# XXX assume we always have a 0 split whenever γ is in the smap
-function nrepresented(model::BMP, γ) 
-    haskey(model, γ) ? length(model[γ]) - 1 : 0
-end
-
-function represented_mass(model::BMP, γ) 
-    haskey(model, γ) ? sum(values(model[γ])) - model[γ][0] : 0
-end
+nrepresented(model::BMP, γ) = haskey(model, γ) ? length(model[γ]) : 0
+#represented_mass(model::BMP, γ) = haskey(model, γ) ? sum(values(model[γ])) : 0
 
 # draw a random tree from a BMP, node id's are clade indices
 randtree(model::BMP) = _randwalk(Node(model.root), model)
@@ -76,14 +82,16 @@ function _randwalk(node, model)
     return node
 end
 
-# generate a random split for a clade according to a sparesly
+# generate a random split for a clade according to a sparsely
 # represented BMP
 function randsplit(model::BMP, clade)
     n = cladesize(clade)
-    r = represented_mass(model, clade)
+    !haskey(model, clade) && return randsplit(clade)
+    splitps = collect(model[clade])
+    weights = last.(splitps) .- model.zmap[clade][1]
+    r = logsumexp(weights)
+    #r = represented_mass(model, clade)
     if rand() < r
-        splitps = collect(model[clade])
-        weights = last.(splitps)
         i = sample(1:length(weights), Weights(weights))
         splt = first(splitps[i])
     else
