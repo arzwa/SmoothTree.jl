@@ -178,7 +178,7 @@ function ep_iteration!(alg, i; mina=10, target=100, maxn=1e5)
     S = randsptree(cavity)
     accepted = typeof(S)[]
     nacc = n = 0
-    while true
+    while true   # this could be parallelized to some extent using blocks
         n += 1
         G = randsplits(MSC(S))
         l = logpdf(x, G) 
