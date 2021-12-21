@@ -1,7 +1,7 @@
 module SmoothTree
 
 using NewickTree, StatsBase, Parameters, Random, StatsFuns, Distributions
-using DataStructures
+using Printf, ProgressBars
 import Distributions: logpdf
 export CCD, MSC, randtree, randsplits, setdistance!, setdistance_internal!
 
@@ -11,8 +11,6 @@ include("bmp.jl")
 include("msc.jl")
 include("nni.jl")
 include("epabc.jl")
-#include("mulccd.jl")
-#include("ep-abc-msc.jl")
 
 # assumed throughout
 _spname(x::String) = string(split(x, "_")[1])

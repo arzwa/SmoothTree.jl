@@ -1,24 +1,27 @@
 using Pkg; Pkg.activate(@__DIR__)
 using SmoothTree, Test, NewickTree
-using StatsBase, Distributions
+using StatsBase, Distributions, Plots
 using Serialization
 data_ = deserialize("docs/data/yeast-rokas/ccd-ufboot.jls")
 trees = readnw.(readlines("docs/data/yeast.trees"))
-taxon_map = SmoothTree.taxon_map(name.(getleaves(trees[1])))
+taxon_map = SmoothTree.taxonmap(name.(getleaves(trees[1])))
 invmap = SmoothTree.inverse(taxon_map)
 
-Ψprior = SmoothTree.NatBMP(CCD(trees, α=1.))
-smple  = SmoothTree.ranking(randtree(SmoothTree.MomBMP(Ψprior), 10000))
+Sprior = SmoothTree.NatBMP(CCD(trees, α=5.))
+smple  = SmoothTree.ranking(randtree(SmoothTree.MomBMP(Sprior), 10000))
 
-θprior = SmoothTree.mom2nat(log(1.5), 2)
+θprior = [SmoothTree.gaussian_mom2nat(log(1.), 5.)...]
 
 data  = CCD.(data_, α=0.01 * length(data_))
-model = SmoothTree.MSCModel(Ψprior, θprior, taxon_map)
-alg = SmoothTree.EPABC(data, model, M=10000, λ=1., α=0.000001)
+model = SmoothTree.MSCModel(Sprior, θprior, taxon_map)
+alg = SmoothTree.EPABC(data, model, λ=0.1, α=0.01)
 
-trace = map(i->SmoothTree.ep_iteration!(alg, i), 1:length(data))
+trace = SmoothTree.ep_pass!(alg, maxn=5e4)
 
-mtrace = map(x->SmoothTree.MomBMP(x.Ψ), trace)
+trace = map(i->SmoothTree.ep_iteration!(alg, i, maxn=5e4), 1:length(data))
+trace = [trace; map(i->SmoothTree.ep_iteration!(alg, i), 1:length(data))]
+
+mtrace = map(x->SmoothTree.MomBMP(x.S), trace)
 
 traces = map(ultimate_clades[2:end]) do clade
     splits = keys(mtrace[end].smap[clade].splits)
@@ -29,26 +32,11 @@ traces = map(ultimate_clades[2:end]) do clade
     X = permutedims(hcat(xs...))
     plot(X, legend=false, yscale=:log10, framestyle=:box,
          gridstyle=:dot, title="clade $(bitstring(clade)[end-7:end])",
-         title_loc=:left, titlefont=7)
+         title_loc=:left, titlefont=7)#, xscale=:log10)
 end |> x->plot(x...)
 
-# -------------------------------------------------------------------
-taxon_map = SmoothTree.taxon_map(name.(getleaves(trees[1])))
-invmap = SmoothTree.inverse(taxon_map)
+smple  = SmoothTree.ranking(randtree(mtrace[end], 10000))
 
-data  = CCD.(data_, α=0.01 * length(data_))
-#Ψprior = SmoothTree.UniformBMP(8)
-Ψprior = SmoothTree.fitbmp(randtree(CCD(trees, α=1.), 10000), invmap)
-#Ψprior = SmoothTree.fitbmp(trees, SmoothTree.inverse(taxon_map))
-θprior = SmoothTree.mom2nat(0.5,2)
-model = SmoothTree.MSCModel(Ψprior, θprior, taxon_map)
-
-alg = SmoothTree.EPABC(data, model, M=10000, λ=0.1)
-
-trace = map(i->SmoothTree.ep_iteration!(alg, i), 1:length(data))
-
-X = log.(permutedims(hcat(map(x->collect(values(x.Ψ.smap[0x0023])), trace)...)))
-plot(X)
 
 maxtree = SmoothTree.ranking(randtree(CCD(trees), 1000))[1][1]
 ultimate_clades = map(SmoothTree.getclades(maxtree)) do x
@@ -65,16 +53,3 @@ traces = map(ultimate_clades[2:end]) do clade
 end |> x->plot(x...)
 
 
-
-# -------------------------------------------------------------------
-data  = CCD.(data_, α=0.01 * length(data_))
-taxa = getleaves(data[1])
-
-Ψprior = CCD(trees, α=1.)
-SmoothTree.ranking(randtree(Ψprior, 10000))
-θprior = SmoothTree.moment2natural(1,1)
-model = SmoothTree.MSCModel(Ψprior, θprior)
-
-alg = SmoothTree.EPABC(data, model)
-
-SmoothTree.ep_iteration!(alg, 1)
