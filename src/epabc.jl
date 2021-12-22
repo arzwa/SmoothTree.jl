@@ -8,9 +8,6 @@
 # some algoithm settings, the overall approximation and the sites of
 # the approximation (as a vector, one for each data point).
 
-taxonmap(l, T=UInt16) = Dict(T(2^i)=>l[i+1] for i=0:length(l)-1)
-inverse(d::Dict) = Dict(v=>k for (k,v) in d)
-
 # Hold for each clade, potentially, the natural parameters of a
 # Gaussian, but only store explicitly when distinct from the prior.
 struct BranchModel{T,V}
@@ -24,17 +21,23 @@ BranchModel(x::NatBMP{T}, prior::V) where {T,V} =
 
 # some accessors
 Base.haskey(m::BranchModel, γ) = haskey(m.cmap, γ)
-Base.getindex(m::BranchModel, γ) = m.cmap[γ]
+Base.getindex(m::BranchModel, γ) = haskey(m, γ) ? m.cmap[γ] : m.prior
 
+"""
+    MSCModel
+
+An object for conducting species tree inference under the MSC.
+"""
 struct MSCModel{T,V,W}
     S::NatBMP{T,V}  # species tree distribution approximation
     q::BranchModel{T,W}  # branch parameter distribution approximation
-    m1::Dict{T,String}  # taxon map BMP => species tree labels
-    m2::Dict{String,T}  # taxon map species tree => BMP labels
+    m::BiMap{T,String}  # taxon map BMP => species tree labels
 end
 
+Base.show(io::IO, m::MSCModel) = write(io, "$(typeof(m))")
+
 # initialize a MSCModel
-MSCModel(x::NatBMP, θprior, m) = MSCModel(x, BranchModel(x, θprior), m, inverse(m))
+MSCModel(x::NatBMP, θprior, m) = MSCModel(x, BranchModel(x, θprior), m)
 
 # the main EP struct
 mutable struct EPABC{X,M}
@@ -44,6 +47,8 @@ mutable struct EPABC{X,M}
     λ    ::Float64  # for damped update...
     α    ::Float64  # Dirichlet-BMP parameter for 'moment matching'
 end
+
+Base.show(io::IO, alg::EPABC{X,M}) where {X,M} = write(io, "EPABC($M, $(alg.λ))")
 
 function EPABC(data, model::T; λ=1., α=0.1) where T
     sites = Vector{T}(undef, length(data))
@@ -59,7 +64,7 @@ function getcavity(full::MSCModel{T,V,W}, site) where {T,V,W}
     end 
     b = BranchModel(q, full.q.prior)
     S = cavity(full.S, site.S)
-    return MSCModel(S, b, full.m1, full.m2)
+    return MSCModel(S, b, full.m)
 end
 
 # 2. We need a method to simulate from the cavity, basically a method
@@ -72,7 +77,7 @@ function randsptree(model::MSCModel)
     # length branch)
     _randbranches!(S, model.q)
     for n in getleaves(S)  # set leaf names
-        n.data.name = model.m1[id(n)]
+        n.data.name = model.m[id(n)]
     end
     return S
 end
@@ -97,7 +102,7 @@ function randgaussian_nat(η1, η2)
 end
 
 # get a univariate gaussian from natural parameters
-gaussian_nat2mom(η1, η2) = (-η1/(2η2), √(-1.0/(2η2)))
+gaussian_nat2mom(η1, η2) = (-η1/(2η2), -1.0/(2η2))
 gaussian_mom2nat(μ , V ) = (μ/V, -1.0/(2V))
 
 # 3. We need a method to update the full approximation by moment
@@ -108,7 +113,7 @@ function updated_model(accepted_trees, model, cavity, λ, α)
     M = NatBMP(CCD(accepted_trees, α=α))
     S = convexcombination(M, model.S, λ)
     q = newbranches(S, accepted_trees, model, cavity, λ)
-    MSCModel(S, q, model.m1, model.m2)
+    MSCModel(S, q, model.m)
 end
 
 function newbranches(S, accepted_trees, model, cavity, λ)
@@ -116,7 +121,7 @@ function newbranches(S, accepted_trees, model, cavity, λ)
     N = length(accepted_trees)
     # obtain moment estimates
     for tree in accepted_trees
-        _record_branchparams!(d, tree, model.m2)
+        _record_branchparams!(d, tree, model.m)
     end
     _cavity_contribution!(d, cavity.q, N)
     # update natural params of full approx by moment matching
@@ -167,9 +172,12 @@ end
 new_site(new_full, cavity) = getcavity(new_full, cavity)
 
 """
-Do an EP-ABC update, conducting simulations until we get `target`
-accepted simulations or exceed a total of `maxn` simulations. If the
-number of accepted draws is smaller than `mina` the update failed.
+    ep_iteration!(alg, i; kwargs...)
+
+Do an EP-ABC update for data point i, conducting simulations until we
+get `target` accepted simulations or exceed a total of `maxn`
+simulations. If the number of accepted draws is smaller than `mina`
+the update failed.
 """
 function ep_iteration!(alg, i; mina=10, target=100, maxn=1e5)
     @unpack data, model, sites = alg
@@ -189,22 +197,63 @@ function ep_iteration!(alg, i; mina=10, target=100, maxn=1e5)
         (n ≥ maxn || nacc ≥ target) && break
         S = randsptree(cavity)
     end
-    nacc < mina && return nacc, n, alg.model
+    nacc < mina && return false, nacc, n, alg.model, cavity
     model_ = updated_model(accepted, model, cavity, alg.λ, alg.α)
-    alg.sites[i] = new_site(model_, cavity) 
-    alg.model = model_
-    return nacc, n, alg.model
+    site_  = new_site(model_, cavity)
+    return true, nacc, n, model_, site_
 end
 
-function ep_pass!(alg; k=1, kwargs...) 
-    iter = ProgressBar(1:length(alg.data))
+"""
+    ep_pass!(alg; k=1, kwargs...)
+
+Do a full serial EP pass over the data.
+"""
+function ep_pass!(alg; k=1, rnd=true, kwargs...) 
+    rnge = rnd ? shuffle(1:length(alg.data)) : 1:length(alg.data)
+    iter = ProgressBar(rnge)
     nacc = n = 0
     trace = map(iter) do i
-        set_description(iter, string(@sprintf("pass%2d%4d/%6d", k, nacc, n)))
-        nacc, n, model = ep_iteration!(alg, i; kwargs...)
+        set_description(iter, string(@sprintf("pass%2d%4d%4d/%6d", k, i, nacc, n)))
+        accepted, nacc, n, model, site = ep_iteration!(alg, i; kwargs...)
+        if accepted
+            alg.sites[i] = site
+            alg.model = model
+        end
         model
     end 
 end
 
+# parallel EP pass
+function pep_pass!(alg; k=1, kwargs...)
+    # do ep in parallel
+    # combine sites
+end
+
+"""
+    ep!(alg, n=1; kwargs...)
+
+Do n EP passes.
+"""
 ep!(alg, n=1; kwargs...) = mapreduce(i->ep_pass!(alg; k=i, kwargs...), vcat, 1:n)
+
+# trace back to analyze the EP approximation
+function traceback(trace)
+    clades = keys(trace[end].S.smap)
+    splits = Dict(γ=>collect(keys(trace[end].S.smap[γ].splits)) for γ in clades)
+    traces = Dict(γ=>Vector{Float64}[] for γ in clades)
+    θtrace = Dict(γ=>Vector{Float64}[] for γ in clades)
+    for i=length(trace):-1:1
+        bmp = SmoothTree.MomBMP(trace[i].S)
+        q = trace[i].q
+        for γ in clades
+            x = map(δ->haskey(bmp, γ) ? bmp[γ][δ] : NaN, splits[γ])
+            y = [gaussian_nat2mom(q[γ]...)...]
+            push!(traces[γ], x)
+            push!(θtrace[γ], y)
+        end
+    end
+    c = Dict(γ=>permutedims(hcat(reverse(xs)...)) for (γ, xs) in traces)
+    θ = Dict(γ=>permutedims(hcat(reverse(xs)...)) for (γ, xs) in θtrace)
+    return c, θ
+end
 

@@ -46,6 +46,7 @@ struct MomBMP{T,V} <: AbstractBMP{T,V}
 end
 
 # accessors
+Base.show(io::IO, m::M) where M<:AbstractBMP = write(io, "$M(o=$(m.root))")
 Base.haskey(m::AbstractBMP, γ) = haskey(m.smap, γ)
 Base.haskey(m::AbstractBMP, γ, δ) = haskey(m, γ) && haskey(m.smap[γ], δ)
 Base.getindex(m::AbstractBMP, γ) = m.smap[γ]

@@ -323,14 +323,14 @@ function logpdf(ccd::CCD, trees::Dict)
     return l
 end
 
+
+getcladesbits(tree, T=UInt16) = getcladesbits(tree, taxonmap(tree))
+
 # get clades as bitstrings
-function getcladesbits(tree, T=UInt16)
+function getcladesbits(tree, m::BiMap{T,V}) where {T,V}
     clades = T[]
-    lmap = indexmap(sort(name.(getleaves(tree))))
     function walk(n)
-        clade = isleaf(n) ? 
-            T(2^(lmap[name(n)]-1)) :
-            walk(n[1]) + walk(n[2])
+        clade = isleaf(n) ? m[name(n)] : walk(n[1]) + walk(n[2])
         push!(clades, clade)
         return clade
     end
