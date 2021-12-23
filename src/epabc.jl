@@ -123,6 +123,7 @@ function newbranches(S, accepted_trees, model, cavity, λ)
     for tree in accepted_trees
         _record_branchparams!(d, tree, model.m)
     end
+    # add unrepresented prior samples (do or don't?)
     _cavity_contribution!(d, cavity.q, N)
     # update natural params of full approx by moment matching
     q′ = updated_q(d, model.q, N, λ)

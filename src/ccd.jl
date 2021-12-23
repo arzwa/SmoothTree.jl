@@ -27,8 +27,7 @@ const Splits{T} = Vector{Tuple{T,T}}
 A conditional clade distribution object.
 """
 mutable struct CCD{T,V}
-    leaves::Vector{String}
-    lmap  ::Dict{String,T}
+    lmap  ::BiMap{T,String}
     cmap  ::Dict{T,V}          # clade counts
     smap  ::Dict{T,Dict{T,V}}  # split counts
     root  ::T
@@ -36,7 +35,7 @@ mutable struct CCD{T,V}
     α     ::Float64
 end
 
-nl(X::CCD) = length(X.leaves)
+nl(X::CCD) = length(X.lmap)
 nc(X::CCD) = length(X.cmap)
 
 function Base.show(io::IO, X::CCD{T}) where T
@@ -63,7 +62,7 @@ cladesize(clade) = count_ones(clade)
 rootclade(n, T=UInt16) = T(2^n - 1) 
 
 # obtain the clade leaf names from its Int representation
-getclade(ccd::CCD, clade) = ccd.leaves[Bool.(digits(clade, base=2, pad=nl(ccd)))]
+#getclade(ccd::CCD, clade) = ccd.leaves[Bool.(digits(clade, base=2, pad=nl(ccd)))]
 
 # conditional clade probability
 ccp(ccd::CCD, γ, δ) = ccd.smap[γ][δ] / ccd.cmap[γ]
@@ -72,15 +71,6 @@ logccp(ccd, γ, δ) = log(ccd.smap[γ][δ]) - log(ccd.cmap[γ])
 # uniform weights for a given vector of elements 
 uweights(xs) = fill(1/length(xs), length(xs))
 
-# from a vector of trees
-function CCD(trees; α=0., αroot=α, T=UInt16)
-    ccd = initccd(trees[1], T, α, αroot)
-    for tree in trees
-        ccd = addtree!(ccd, tree)
-    end
-    return ccd
-end
-
 # from a countmap
 CCD(trees::AbstractDict; kwargs...) = CCD(collect(trees); kwargs...)
 
@@ -88,25 +78,26 @@ CCD(trees::AbstractDict; kwargs...) = CCD(collect(trees); kwargs...)
 CCD(tree::Node; kwargs...) = CCD([tree]; kwargs...)
 
 # get a uniform BMP distribution on a certain leaf set
-CCD(leaves::Vector{String}; α=1., αroot=α, T=UInt16) = initccd(leaves, T, α, αroot)
+CCD(lmap::BiMap; α=1., αroot=α) = initccd(lmap, α, αroot)
 
-# initialize a ccd, either from a tree, from a pair tree => count or
-# from a leafset
-initccd(tpair::Pair, args...) = initccd(first(tpair), args...)  
-initccd(tree::Node, args...) = initccd(name.(getleaves(tree)), args...)
+# from a vector of (pairs of) trees
+function CCD(trees; lmap=taxonmap(trees[1], UInt16), α=0., αroot=α)
+    ccd = initccd(lmap, α, αroot)
+    for tree in trees
+        ccd = addtree!(ccd, tree)
+    end
+    return ccd
+end
 
-function initccd(leaves, T=UInt16, α=0., αroot=α)
-    lmap = leafclades(leaves, T)
-    cmap = Dict{T,Int64}(l=>0 for (_,l) in lmap)
+function initccd(lmap::BiMap{T,V}, α=0., αroot=α) where {T,V}
+    cmap = Dict{T,Int64}(γ=>0 for (γ,_) in lmap)
     smap = Dict{T,Dict{T,Int64}}()
-    kv = collect(lmap)
-    leaves = first.(sort(kv, by=last))
-    root = T(sum(last.(kv)))
+    root = T(sum(keys(lmap)))
     cmap[root] = 0  
     smap[root] = Dict{T,Int64}()
     # Note that the rootclade must always be present for randtree
     # to work, also if there are no observations added to the CCD 
-    ccd = CCD(leaves, lmap, cmap, smap, root, αroot, α)
+    ccd = CCD(lmap, cmap, smap, root, αroot, α)
 end
 
 # assign leaf clade numbers (base 2)
@@ -242,7 +233,7 @@ function randsplit(γ::T) where T
 end
 
 # obtain a gene tree from a split set
-function treefromsplits(splits::Splits{T}, names::Dict) where T
+function treefromsplits(splits::Splits{T}, names) where T
     nodes = Dict{T,DefaultNode{T}}()
     for (γ, δ) in splits
         p, l, r = map(c->_getnode!(nodes, names, c), [γ, δ, γ-δ])
@@ -262,8 +253,7 @@ end
 # draw a random tree from the CCD
 function randtree(ccd::CCD)
     splits = randsplits(ccd)
-    names = Dict(v=>k for (k,v) in ccd.lmap)
-    treefromsplits(splits, names)
+    treefromsplits(splits, ccd.lmap)
 end
 
 # generic extension of randtree (also works for MSC)
@@ -322,7 +312,6 @@ function logpdf(ccd::CCD, trees::Dict)
     end
     return l
 end
-
 
 getcladesbits(tree, T=UInt16) = getcladesbits(tree, taxonmap(tree))
 

@@ -11,11 +11,11 @@ Sprior = NatBMP(CCD(trees, α=5.))
 smple  = ranking(randtree(MomBMP(Sprior), 10000))
 θprior = [SmoothTree.gaussian_mom2nat(log(1.), 5.)...]
 
-data  = CCD.(data_, α=0.01 * length(data_))
+data  = CCD.(data_, lmap=tmap, α=0.01 * length(data_))
 model = MSCModel(Sprior, θprior, tmap)
 alg   = EPABC(data, model, λ=0.2, α=1e-3)
 
-trace = ep!(alg, 2, maxn=1e5, mina=10, target=20)
+trace = ep!(alg, 2, maxn=1e5, mina=10, target=200)
 
 X, Y = traceback(trace)
 
@@ -30,7 +30,7 @@ smple  = SmoothTree.ranking(randtree(SmoothTree.MomBMP(trace[end].S), 10000))
 
 maxtree = SmoothTree.ranking(randtree(CCD(trees), 1000))[1][1]
 ultimate_clades = map(SmoothTree.getclades(maxtree)) do x
-    UInt16(sum([invmap[y] for y in name.(x)]))
+    UInt16(sum([tmap[y] for y in name.(x)]))
 end
 ultimate_clades = filter(x->!SmoothTree.isleafclade(x), ultimate_clades)
 

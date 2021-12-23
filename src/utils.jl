@@ -4,7 +4,7 @@
 Bijective map for distinct types, so that `getindex` dispatches on
 type.
 """
-struct BiMap{T,V}
+struct BiMap{T,V} <: AbstractDict{T,V}
     m1::Dict{T,V}
     m2::Dict{V,T}
     function BiMap(d::Dict{T,V}) where {T,V}
@@ -13,10 +13,13 @@ struct BiMap{T,V}
     end
 end
 
+Base.length(m::BiMap) = length(m.m1)
 Base.getindex(m::BiMap{T,V}, k::T) where {T,V} = m.m1[k]
 Base.getindex(m::BiMap{T,V}, k::V) where {T,V} = m.m2[k]
 Base.haskey(m::BiMap{T,V}, k::T) where {T,V} = haskey(m.m1, k)
 Base.haskey(m::BiMap{T,V}, k::V) where {T,V} = haskey(m.m2, k)
+Base.iterate(m::BiMap) = Base.iterate(m.m1)
+Base.iterate(m::BiMap, i) = Base.iterate(m.m1, i)
 
 # because why not
 function Base.show(io::IO, m::BiMap{T,V}) where {T,V} 
@@ -27,11 +30,20 @@ function Base.show(io::IO, m::BiMap{T,V}) where {T,V}
 end
 
 # a taxonmap
+taxonmap(pair::Pair, T=UInt16) = taxonmap(first(pair), T)
 taxonmap(tree, T=UInt16) = taxonmap(name.(getleaves(tree)), T)
 
 function taxonmap(l::Vector{String}, T=UInt16)
     d = Dict(T(2^i)=>l[i+1] for i=0:length(l)-1)
     return BiMap(d)
+end
+
+relabel(tree, m) = relabel!(deepcopy(tree), m)
+function relabel!(tree, m)
+    for n in getleaves(tree)
+        n.data.name = m[id(n)]
+    end
+    return tree
 end
 
 # root all trees identically

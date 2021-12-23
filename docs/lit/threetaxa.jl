@@ -54,31 +54,36 @@ function marginal_lhood(G, S, m, prior)
 end
 
 # Simulate data
-S = SmoothTree.MSC(nw"((A:Inf,B:Inf):0.2,C:Inf);")
-#S = SmoothTree.MSC(nw"((B:Inf,C:Inf):.1,A:Inf);")
+#S = SmoothTree.MSC(nw"((A:Inf,B:Inf):0.2,C:Inf);")
+θ = 0.6
+S = SmoothTree.MSC(readnw("((B:Inf,C:Inf):$θ,A:Inf);"))
 m = SmoothTree.taxonmap(S.tree)
 Y = randtree(S, 100)
 X = countmap(Y)
 G = triples(X, m)
 
+# get posterior probs by integration
 using QuadGK
 trees = collect(keys(X))
 prior = Normal()
 ls = map(tree->marginal_lhood(G, tree, m, prior), trees)
 pp = ls ./ sum(ls)
+pp = Dict(t=>p for (t,p) in zip(trees, pp))
 
-Sprior = NatBMP(CCD(trees, α=1.))
+Sprior = NatBMP(CCD(trees, lmap=m, α=1.))
 smple  = ranking(randtree(MomBMP(Sprior), 10000))
 θprior = [SmoothTree.gaussian_mom2nat(log(1.), 5.)...]
-
-data  = CCD.(Y, α=0.)
+data  = CCD.(Y, lmap=m, α=0.)
 model = MSCModel(Sprior, θprior, m)
-alg   = EPABC(data, model, λ=0.1, α=1e-5)
+alg   = EPABC(data, model, λ=0.05, α=1e-9)
 
-trace = ep!(alg, 3, maxn=1e5, mina=100, target=200);
-smple  = SmoothTree.ranking(randtree(SmoothTree.MomBMP(trace[end].S), 10000))
+trace = ep!(alg, 10, maxn=1e5, mina=200, target=1000);
+smple = SmoothTree.ranking(randtree(SmoothTree.MomBMP(trace[end].S), 10000))
 
 A, B = traceback(trace)
+p1 = plot(A[0x0007])
+p2 = plot(B[0x0003])
+hline!(p2, [log(θ)], ls=:dot, color=:black)
 
 S = SmoothTree.randsptree(trace[end])
 M = SmoothTree.MSC(S)
