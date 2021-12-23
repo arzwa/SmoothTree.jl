@@ -38,6 +38,7 @@ function taxonmap(l::Vector{String}, T=UInt16)
     return BiMap(d)
 end
 
+# relabel a tree based on an id<=>string map
 relabel(tree, m) = relabel!(deepcopy(tree), m)
 function relabel!(tree, m)
     for n in getleaves(tree)
@@ -57,3 +58,46 @@ function rootall!(trees, leaf)
     f = x->getroot(NewickTree.set_outgroup!(x, leaf))
     map(f, trees)
 end
+
+# utilities for setting species tree branch lengths
+n_internal(S) = length(postwalk(S)) - length(getleaves(S)) - 1
+
+function setdistance!(S, θ::Vector)
+    for (i,n) in enumerate(postwalk(S))
+        isroot(n) && return
+        n.data.distance = θ[i]
+    end
+end
+
+function setdistance_internal!(S, θ::Vector)
+    i = 1
+    for n in postwalk(S)
+        (isroot(n) || isleaf(n)) && continue
+        n.data.distance = θ[i]
+        i += 1
+    end
+end
+
+# when dealing with outgroup rooted trees, there is no information
+# about species tree branch lengths for the branches coming from the
+# root
+function setdistance_internal_rooted!(S, θ::Vector)
+    i = 1
+    for n in postwalk(S)
+        (isroot(n) || isleaf(n)) && continue
+        if isroot(parent(n))
+            n.data.distance = Inf
+        else
+            n.data.distance = θ[i]
+            i += 1
+        end
+    end
+end
+
+function setdistance!(S, θ::Number)
+    for (i,n) in enumerate(postwalk(S))
+        isroot(n) && return
+        n.data.distance = θ
+    end
+end
+

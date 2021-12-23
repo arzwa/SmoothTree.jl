@@ -1,3 +1,9 @@
+using Pkg; Pkg.activate(@__DIR__)
+using SmoothTree, Test, NewickTree
+using StatsBase, Distributions, Plots
+using Serialization
+default(gridstyle=:dot, legend=false, framestyle=:box, title_loc=:left, titlefont=7)
+
 # Three-taxon case
 # Species tree S = ((A,B),C)
 # Gene tree probabilities
@@ -55,10 +61,11 @@ end
 
 # Simulate data
 #S = SmoothTree.MSC(nw"((A:Inf,B:Inf):0.2,C:Inf);")
-θ = 0.6
-S = SmoothTree.MSC(readnw("((B:Inf,C:Inf):$θ,A:Inf);"))
-m = SmoothTree.taxonmap(S.tree)
-Y = randtree(S, 100)
+θ = 0.5
+S = readnw("((B:Inf,C:Inf):$θ,A:Inf);")
+m = SmoothTree.taxonmap(S)
+M = SmoothTree.MSC(S, m)
+Y = randtree(M, m, 100)
 X = countmap(Y)
 G = triples(X, m)
 
@@ -74,10 +81,10 @@ Sprior = NatBMP(CCD(trees, lmap=m, α=1.))
 smple  = ranking(randtree(MomBMP(Sprior), 10000))
 θprior = [SmoothTree.gaussian_mom2nat(log(1.), 5.)...]
 data  = CCD.(Y, lmap=m, α=0.)
-model = MSCModel(Sprior, θprior, m)
-alg   = EPABC(data, model, λ=0.05, α=1e-9)
+model = MSCModel(Sprior, θprior)
+alg   = EPABC(data, model, λ=0.5, α=1e-9)
 
-trace = ep!(alg, 10, maxn=1e5, mina=200, target=1000);
+trace = ep!(alg, 10, maxn=1e5, mina=200, target=200);
 smple = SmoothTree.ranking(randtree(SmoothTree.MomBMP(trace[end].S), 10000))
 
 A, B = traceback(trace)
@@ -86,8 +93,8 @@ p2 = plot(B[0x0003])
 hline!(p2, [log(θ)], ls=:dot, color=:black)
 
 S = SmoothTree.randsptree(trace[end])
-M = SmoothTree.MSC(S)
-pps = proportionmap(randtree(M, 100000))
+M = SmoothTree.MSC(S, Dict(id(n)=>[id(n)] for n in getleaves(S)))
+pps = proportionmap(randtree(M, m, 10000))
 obs = proportionmap(Y)
 
 xs = map(x->(x[2], haskey(pps, x[1]) ? pps[x[1]] : 0.), collect(obs))

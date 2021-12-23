@@ -79,6 +79,7 @@ CCD(tree::Node; kwargs...) = CCD([tree]; kwargs...)
 
 # get a uniform BMP distribution on a certain leaf set
 CCD(lmap::BiMap; α=1., αroot=α) = initccd(lmap, α, αroot)
+CCD(leaves::Vector{String}; kwargs...) = CCD(taxonmap(leaves); kwargs...)
 
 # from a vector of (pairs of) trees
 function CCD(trees; lmap=taxonmap(trees[1], UInt16), α=0., αroot=α)
@@ -330,7 +331,11 @@ end
 # XXX the above does not work as a hashing function! isomorphic trees
 # (same topology, different labels) will have the same clade set!
 # This does lead to the following handy function
-isisomorphic(t1, t2) = hash(sort(getcladesbits(t1))) == hash(sort(getcladesbits(t2)))
+function isisomorphic(t1, t2, tmap)
+    h1 = hash(sort(getcladesbits(t1, tmap)))
+    h2 = hash(sort(getcladesbits(t2, tmap)))
+    h1 == h2
+end
 
 # allows to count topologies using `countmap`
 # note though that this is not really worthwhile, reading in the ccd

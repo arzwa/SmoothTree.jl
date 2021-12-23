@@ -7,15 +7,15 @@ data_ = deserialize("docs/data/yeast-rokas/ccd-ufboot.jls")
 trees = readnw.(readlines("docs/data/yeast.mltrees"))
 tmap = SmoothTree.taxonmap(trees[1])
 
-Sprior = NatBMP(CCD(trees, α=5.))
+Sprior = NatBMP(CCD(trees, lmap=tmap, α=5.))
 smple  = ranking(randtree(MomBMP(Sprior), 10000))
 θprior = [SmoothTree.gaussian_mom2nat(log(1.), 5.)...]
 
 data  = CCD.(data_, lmap=tmap, α=0.01 * length(data_))
-model = MSCModel(Sprior, θprior, tmap)
-alg   = EPABC(data, model, λ=0.2, α=1e-3)
+model = MSCModel(Sprior, θprior)
+alg   = EPABC(data, model, λ=0.2, α=1e-5)
 
-trace = ep!(alg, 2, maxn=1e5, mina=10, target=200)
+trace = ep!(alg, 2, maxn=1e5, mina=10, target=20)
 
 X, Y = traceback(trace)
 
@@ -41,8 +41,8 @@ traces = map(ultimate_clades[2:end]) do clade
 end |> x->plot(x...)
 
 S = SmoothTree.randsptree(trace[end])
-M = SmoothTree.MSC(S)
-pps = proportionmap(randtree(M, 100000))
+M = SmoothTree.MSC(S, Dict(id(n)=>[id(n)] for n in getleaves(S)))
+pps = proportionmap(randtree(M, tmap, 10000))
 obs = proportionmap(trees)
 
 xs = map(x->(x[2], haskey(pps, x[1]) ? pps[x[1]] : 0.), collect(obs))

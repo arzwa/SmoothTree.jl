@@ -31,13 +31,12 @@ An object for conducting species tree inference under the MSC.
 struct MSCModel{T,V,W}
     S::NatBMP{T,V}  # species tree distribution approximation
     q::BranchModel{T,W}  # branch parameter distribution approximation
-    m::BiMap{T,String}  # taxon map BMP => species tree labels
 end
 
 Base.show(io::IO, m::MSCModel) = write(io, "$(typeof(m))")
 
 # initialize a MSCModel
-MSCModel(x::NatBMP, θprior, m) = MSCModel(x, BranchModel(x, θprior), m)
+MSCModel(x::NatBMP, θprior) = MSCModel(x, BranchModel(x, θprior))
 
 # the main EP struct
 mutable struct EPABC{X,M}
@@ -64,7 +63,7 @@ function getcavity(full::MSCModel{T,V,W}, site) where {T,V,W}
     end 
     b = BranchModel(q, full.q.prior)
     S = cavity(full.S, site.S)
-    return MSCModel(S, b, full.m)
+    return MSCModel(S, b)
 end
 
 # 2. We need a method to simulate from the cavity, basically a method
@@ -76,9 +75,6 @@ function randsptree(model::MSCModel)
     # XXX need to deal with the rooted case as well (another Inf
     # length branch)
     _randbranches!(S, model.q)
-    for n in getleaves(S)  # set leaf names
-        n.data.name = model.m[id(n)]
-    end
     return S
 end
 
@@ -113,7 +109,7 @@ function updated_model(accepted_trees, model, cavity, λ, α)
     M = NatBMP(CCD(accepted_trees, α=α))
     S = convexcombination(M, model.S, λ)
     q = newbranches(S, accepted_trees, model, cavity, λ)
-    MSCModel(S, q, model.m)
+    MSCModel(S, q)
 end
 
 function newbranches(S, accepted_trees, model, cavity, λ)
@@ -121,7 +117,7 @@ function newbranches(S, accepted_trees, model, cavity, λ)
     N = length(accepted_trees)
     # obtain moment estimates
     for tree in accepted_trees
-        _record_branchparams!(d, tree, model.m)
+        _record_branchparams!(d, tree)
     end
     # add unrepresented prior samples (do or don't?)
     _cavity_contribution!(d, cavity.q, N)
@@ -130,10 +126,10 @@ function newbranches(S, accepted_trees, model, cavity, λ)
     return BranchModel(q′, model.q.prior)
 end
 
-function _record_branchparams!(d, node, lmap)
-    isleaf(node) && return lmap[name(node)]
-    left = _record_branchparams!(d, node[1], lmap) 
-    rght = _record_branchparams!(d, node[2], lmap) 
+function _record_branchparams!(d, node)
+    isleaf(node) && return id(node) #lmap[name(node)]
+    left = _record_branchparams!(d, node[1]) 
+    rght = _record_branchparams!(d, node[2]) 
     clade = left + rght
     x = log(node.data.distance)
     if !haskey(d, clade)
@@ -185,11 +181,13 @@ function ep_iteration!(alg, i; mina=10, target=100, maxn=1e5)
     x = data[i]
     cavity = isassigned(sites, i) ? getcavity(model, sites[i]) : model
     S = randsptree(cavity)
+    init = Dict(id(n)=>[id(n)] for n in getleaves(S))
+    # XXX the init is where the gene to species mapping happens!
     accepted = typeof(S)[]
     nacc = n = 0
     while true   # this could be parallelized to some extent using blocks
         n += 1
-        G = randsplits(MSC(S))
+        G = randsplits(MSC(S, init))
         l = logpdf(x, G) 
         if log(rand()) < l
             push!(accepted, S)

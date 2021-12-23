@@ -13,88 +13,26 @@
 # data structure in the way we usually do, and gain efficiency that
 # way.
 
+# XXX Minimalist implementation
 """
     MSC(species_tree)
  
 Multi-species coalescent distribution over gene trees for a given
 species tree with branch lengths in coalescent units.
 """
-struct MSC{T,V,Ψ}
+struct MSC{T,Ψ}
     tree     ::Ψ
-    leafindex::Dict{String,V}     # species name to species tree node
-    init     ::Dict{V,Vector{T}}  # species tree node to gene tree leaves
-    names    ::Dict{V,String}     # gene tree leaf names
-end
-
-# construct MSC object
-function MSC(tree) 
-    tree.data.distance = Inf  # always
-    leaves = getleaves(tree)
-    leafindex = Dict(name(n)=>id(n) for n in leaves)
-    # default initialization
-    leafids = id.(leaves)
-    T = eltype(leafids)
-    order = sortperm(leafids)
-    init  = Dict(v=>T[2^(i-1)] for (i,v) in enumerate(leafids[order]))
-    names = Dict(T(2^(i-1))=>name(l) for (i,l) in enumerate(leaves[order]))
-    MSC(tree, leafindex, init, names)
-end
-
-# adapt an existing MSC model to a new gene family
-(model::MSC)(ccd::CCD) = MSC(model.tree, model.leafindex, initmsc(model, ccd)...)
-
-# initialize the leaf genes for an MSC model for a gene family
-function initmsc(model, ccd::CCD{T}) where T
-    @unpack leafindex = model
-    d = Dict(v=>T[] for (k, v) in model.leafindex)
-    n = Dict{T,String}()
-    for (g, γ) in ccd.lmap
-        push!(d[leafindex[_spname(g)]], γ)
-        n[γ] = g
-    end
-    return d, n
-end
-
-# utilities for setting species tree branch lengths
-n_internal(S) = length(postwalk(S)) - length(getleaves(S)) - 1
-
-function setdistance!(S, θ::Vector)
-    for (i,n) in enumerate(postwalk(S))
-        isroot(n) && return
-        n.data.distance = θ[i]
+    init     ::Dict{T,Vector{T}}  # species tree node to gene tree leaves
+    function MSC(tree::Ψ, init::Dict{T,Vector{T}}) where {Ψ,T}
+        tree.data.distance = Inf  # always
+        new{T,Ψ}(tree, init)
     end
 end
 
-function setdistance_internal!(S, θ::Vector)
-    i = 1
-    for n in postwalk(S)
-        (isroot(n) || isleaf(n)) && continue
-        n.data.distance = θ[i]
-        i += 1
-    end
-end
+# default initialization
+default_init(S, tmap::BiMap) = Dict(id(n)=>[tmap[name(n)]] for n in getleaves(S))
 
-# when dealing with outgroup rooted trees, there is no information
-# about branch lengths for the branches coming from the root
-function setdistance_internal_rooted!(S, θ::Vector)
-    i = 1
-    for n in postwalk(S)
-        (isroot(n) || isleaf(n)) && continue
-        if isroot(parent(n))
-            n.data.distance = Inf
-        else
-            n.data.distance = θ[i]
-            i += 1
-        end
-    end
-end
-
-function setdistance!(S, θ::Number)
-    for (i,n) in enumerate(postwalk(S))
-        isroot(n) && return
-        n.data.distance = θ
-    end
-end
+MSC(S, tmap::BiMap) = MSC(S, default_init(S, tmap))
 
 # generate a tree from the MSC model, in the form of a set of splits.
 function randsplits(model::MSC{T}) where T
@@ -118,63 +56,19 @@ function _censoredcoalsplits!(splits, t, lineages)
     t -= randexp() * 2 / (k*(k-1))
     while t > 0. 
         shuffle!(lineages)
-        c1 = lineages[end-1]
-        c2 = lineages[end]
+        c1 = pop!(lineages)
+        c2 = pop!(lineages)
         γ = c1 + c2
         δ = c1 < c2 ? c1 : c2 
         push!(splits, (γ, δ))
-        lineages = [lineages[1:end-2] ; γ]
+        push!(lineages, γ)
         k = length(lineages)
         t -= randexp() * 2 / (k*(k-1))
     end
     return lineages, splits
 end
 
-# construct a CCD object from a set of splits
-function CCD(model::MSC, splits::Vector{Splits{T}}; α=0., αroot=α) where T
-    ccd = initccd(model, splits[1], α, αroot)
-    for x in splits
-        addsplits!(ccd, x)
-    end
-    return ccd
-end
-
-# Initialize a CCD object for an MSC model. This could almost but not
-# quite be shared with the usual CCD constructor based on (gene)
-# trees, the difference being that here we have to make sure it works
-# when a species has multiple leaves.
-function initccd(model::MSC, splits::Splits{T}, α=0., αroot=α) where T
-    leaves = collect(keys(model.leafindex))
-    lmap = Dict{String,T}()
-    for (k,v) in model.leafindex
-        for (i,g) in enumerate(model.init[v])
-            gname = i == 1 ? k : "$(k)_$i"  # bit hacky...
-            lmap[gname] = g
-        end
-    end
-    cmap = Dict{T,Int64}(l=>0 for (_,l) in lmap)
-    smap = Dict{T,Dict{T,Int64}}()
-    root = T(sum(values(lmap)))
-    CCD(leaves, lmap, cmap, smap, root, αroot, α)
-end
-
-# add a bunch of splits to a CCD
-function addsplits!(ccd, s, w=1)
-    for (γ, δ) in s
-        _update!(ccd.cmap, ccd.smap, γ, δ)
-        ccd.cmap[γ] += w
-        ccd.smap[γ][δ] += w
-    end
-end
-
 # get a random tree from the MSC, *as a tree data structure*
-randtree(model::MSC) = treefromsplits(randsplits(model), model.names)
-
-# The above all simulates *topologies*, but we may also want functions
-# to simulate coalescent histories, i.e. with branch lengths...
-# However, such branch lengths do not readily translate to gene tree
-# branch lengths, sice then we'd need to define the MSC along a time
-# tree, with explicit Ne parameters... This is not however of interest
-# in the context of this library except for simulation purposes, and
-# simulation methods for such things exist elsewhere (e.g. RevBayes).
+randtree(model::MSC, lmap::AbstractDict) = treefromsplits(randsplits(model), lmap)
+randtree(model::MSC, lmap::AbstractDict, n) = map(_->randtree(model, lmap), 1:n)
 

@@ -30,11 +30,15 @@ using StatsBase, Distributions
     @testset "MSC" begin
         using SmoothTree: randtree, isisomorphic, MSC
         S = nw"(((((A,B),C),(D,E)),(F,(G,H))),O);"
+        m = taxonmap(S)
+        init = SmoothTree.default_init(S, m)
         SmoothTree.setdistance!(S, Inf)
-        @test isisomorphic(randtree(MSC(S)), S)
+        @test isisomorphic(randtree(MSC(S, init), m), S, m)
         S = nw"((A,B),C);"
+        m = taxonmap(S)
+        init = SmoothTree.default_init(S, m)
         SmoothTree.setdistance!(S, 0.)
-        trees = proportionmap(randsplits(MSC(S), 1e5))
+        trees = proportionmap(randsplits(MSC(S, init), 1e5))
         @test all(values(trees) .- 1/3 .< 0.01)
     end
 
@@ -77,11 +81,14 @@ using StatsBase, Distributions
             n = 1000
             # we get some 'observed data' from MSC simulations
             S = nw"(((A,B),C),D);"
+            m = taxonmap(S)
             SmoothTree.setdistance!(S, 5.)
-            model = SmoothTree.MSC(S)
-            data = CCD(model, SmoothTree.randsplits(model, 1000), α=0.001) 
+            model = SmoothTree.MSC(S, SmoothTree.default_init(S, m))
+            #data = CCD(model, SmoothTree.randsplits(model, 1000), α=0.001) 
+            data = SmoothTree.randtree(model, m, 1000)
+            ccd = CCD(data, lmap=m, α=0.001) 
             # we construct a BMP tree prior
-            treeprior = CCD(randtree(data, n), α=α*n)
+            treeprior = CCD(randtree(ccd, n), α=α*n)
             # estimate the likelihood of the 15 trees using simulation
             trees = SmoothTree.ranking(randtree(treeprior, 100000))
             # compute the likelihood of the 15 trees algorithmically
@@ -106,7 +113,8 @@ using StatsBase, Distributions
     @testset "Tree isomorphism" begin
         t1 = nw"(((((gge,iov),(xtz,dzq)),sgt),smo),jvs);"
         t2 = nw"((smo,(((gge,iov),(xtz,dzq)),sgt)),jvs);"
-        @test SmoothTree.isisomorphic(t1, t2)
+        m = taxonmap(t1)
+        @test SmoothTree.isisomorphic(t1, t2, m)
     end
 
     @testset "marginal clade size" begin
