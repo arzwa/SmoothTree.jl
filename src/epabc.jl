@@ -105,10 +105,12 @@ gaussian_mom2nat(μ , V ) = (μ/V, -1.0/(2V))
 # matching. We need something like the BranchModel storing for each
 # clade in the accepted simulations the count for that clade, and its
 # mean and squared parameter value
-function updated_model(accepted_trees, model, cavity, λ, α)
-    M = NatBMP(CCD(accepted_trees, α=α))
-    S = convexcombination(M, model.S, λ)
-    q = newbranches(S, accepted_trees, model, cavity, λ)
+function updated_model(accepted_trees, model, cavity, alg)
+    T = typeof(alg.model.S.root)
+    m = taxonmap(accepted_trees[1], T)  # XXX sucks?
+    M = NatBMP(CCD(accepted_trees, lmap=m, α=alg.α)) 
+    S = convexcombination(M, model.S, alg.λ)
+    q = newbranches(S, accepted_trees, model, cavity, alg.λ)
     MSCModel(S, q)
 end
 
@@ -120,7 +122,7 @@ function newbranches(S, accepted_trees, model, cavity, λ)
         _record_branchparams!(d, tree)
     end
     # add unrepresented prior samples (do or don't?)
-    #_cavity_contribution!(d, cavity.q, N)
+    _cavity_contribution!(d, cavity.q, N)
     # update natural params of full approx by moment matching
     q′ = updated_q(d, model.q, N, λ)
     return BranchModel(q′, model.q.prior)
@@ -176,7 +178,7 @@ get `target` accepted simulations or exceed a total of `maxn`
 simulations. If the number of accepted draws is smaller than `mina`
 the update failed.
 """
-function ep_iteration!(alg, i; mina=10, target=100, maxn=1e5)
+function ep_iteration!(alg, i; mina=10, target=100, maxn=1e5, noisy=true)
     @unpack data, model, sites = alg
     x = data[i]
     cavity = isassigned(sites, i) ? getcavity(model, sites[i]) : model
@@ -187,9 +189,11 @@ function ep_iteration!(alg, i; mina=10, target=100, maxn=1e5)
     nacc = n = 0
     while true   # this could be parallelized to some extent using blocks
         n += 1
+        noisy && n % 100 == 0 && (@info n)
         G = randsplits(MSC(S, init))
         l = logpdf(x, G) 
         if log(rand()) < l
+            noisy && (@info "accepted! ($nacc)")
             push!(accepted, S)
             nacc += 1
         end
@@ -197,7 +201,7 @@ function ep_iteration!(alg, i; mina=10, target=100, maxn=1e5)
         S = randsptree(cavity)
     end
     nacc < mina && return false, nacc, n, alg.model, cavity
-    model_ = updated_model(accepted, model, cavity, alg.λ, alg.α)
+    model_ = updated_model(accepted, model, cavity, alg)
     site_  = new_site(model_, cavity)
     return true, nacc, n, model_, site_
 end

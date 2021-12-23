@@ -11,12 +11,12 @@ Sprior = NatBMP(CCD(trees, lmap=tmap, α=5.))
 smple  = ranking(randtree(MomBMP(Sprior), 10000))
 θprior = [SmoothTree.gaussian_mom2nat(log(1.), 5.)...]
 
-data  = CCD.(data_, lmap=tmap, α=.1)
-#data  = CCD.(trees, lmap=tmap, α=.0)
+#data  = CCD.(data_, lmap=tmap, α=.1)
+data  = CCD.(trees, lmap=tmap, α=.0)
 model = MSCModel(Sprior, θprior)
-alg   = EPABC(data, model, λ=0.1, α=1e-9)
+alg   = EPABC(data, model, λ=0.5, α=1e-9)
 
-trace = ep!(alg, 2, maxn=1e5, mina=10, target=100)
+trace = ep!(alg, 2, maxn=5e4, mina=10, target=50)
 
 X, Y = traceback(trace)
 
@@ -34,12 +34,9 @@ ultimate_clades = map(SmoothTree.getclades(maxtree)) do x
     UInt16(sum([tmap[y] for y in name.(x)]))
 end
 ultimate_clades = filter(x->!SmoothTree.isleafclade(x), ultimate_clades)
-
 traces = map(ultimate_clades[2:end]) do clade
-    plot(X[clade], legend=false, framestyle=:box,
-         gridstyle=:dot, title="clade $(bitstring(clade)[end-7:end])",
-         title_loc=:left, titlefont=7)#, xscale=:log10)
-end |> x->plot(x...)
+    plot(plot(X[clade]), plot(Y[clade]))
+end |> x->plot(x..., size=(900,200))
 
 S = SmoothTree.randsptree(trace[end])
 M = SmoothTree.MSC(S, Dict(id(n)=>[id(n)] for n in getleaves(S)))
@@ -48,4 +45,6 @@ obs = proportionmap(trees)
 
 xs = map(x->(x[2], haskey(pps, x[1]) ? pps[x[1]] : 0.), collect(obs))
 scatter(xs, color=:lightgray, size=(400,400)); plot!(x->x, color=:black, ls=:dot)
+
+# the posterior predictive distribution for gene trees differs strongly
 

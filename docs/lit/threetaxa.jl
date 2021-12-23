@@ -2,6 +2,7 @@ using Pkg; Pkg.activate(@__DIR__)
 using SmoothTree, Test, NewickTree
 using StatsBase, Distributions, Plots
 using Serialization
+using LaTeXStrings, StatsPlots
 default(gridstyle=:dot, legend=false, framestyle=:box, title_loc=:left, titlefont=7)
 
 # Three-taxon case
@@ -59,13 +60,26 @@ function marginal_lhood(G, S, m, prior)
     return integral
 end
 
+# p(θ|X) = ∑p(X|θ,S)p(θ)p(S)/ ∑∫p(X|θ,S)p(θ)dθp(S)
+function postpdf(G, trees, m, prior; steps=1000) 
+    ls = map(tree->marginal_lhood(G, tree, m, prior), trees)
+    q1, q2 = quantile(prior, [0.001, 0.999])
+    step = (q2-q1)/steps
+    f(θ,S) = loglhood(setθ!(deepcopy(S), exp(θ)), m, G) + logpdf(prior, θ)
+    map(q1:step:q2) do θ
+        cond = map(S->f(θ,S), trees)
+        (θ, sum(exp.(cond))/sum(ls))
+    end
+end
+
 # Simulate data
 #S = SmoothTree.MSC(nw"((A:Inf,B:Inf):0.2,C:Inf);")
 θ = 0.5
 S = readnw("((B:Inf,C:Inf):$θ,A:Inf);")
 m = SmoothTree.taxonmap(S)
 M = SmoothTree.MSC(S, m)
-Y = randtree(M, m, 100)
+n = 100
+Y = randtree(M, m, n)
 X = countmap(Y)
 G = triples(X, m)
 
@@ -76,28 +90,40 @@ prior = Normal()
 ls = map(tree->marginal_lhood(G, tree, m, prior), trees)
 pp = ls ./ sum(ls)
 pp = Dict(t=>p for (t,p) in zip(trees, pp))
+ppdf = postpdf(G, trees, m, prior)
 
 Sprior = NatBMP(CCD(trees, lmap=m, α=1.))
 smple  = ranking(randtree(MomBMP(Sprior), 10000))
 θprior = [SmoothTree.gaussian_mom2nat(log(1.), 5.)...]
 data  = CCD.(Y, lmap=m, α=0.)
 model = MSCModel(Sprior, θprior)
-alg   = EPABC(data, model, λ=0.5, α=1e-9)
-
+alg   = EPABC(data, model, λ=0.1, α=1e-9)
 trace = ep!(alg, 10, maxn=1e5, mina=200, target=200);
 smple = SmoothTree.ranking(randtree(SmoothTree.MomBMP(trace[end].S), 10000))
 
-A, B = traceback(trace)
-p1 = plot(A[0x0007])
-p2 = plot(B[0x0003])
-hline!(p2, [log(θ)], ls=:dot, color=:black)
+combine(xs::Vector{<:Dict}) = Dict(k=>[x[k] for x in xs] for k in keys(xs[1]))
 
+A, B = traceback(trace)
 S = SmoothTree.randsptree(trace[end])
 M = SmoothTree.MSC(S, Dict(id(n)=>[id(n)] for n in getleaves(S)))
-pps = proportionmap(randtree(M, m, 10000))
+pps = combine(map(_->proportionmap(randtree(M, m, n)), 1:1000))
 obs = proportionmap(Y)
 
-xs = map(x->(x[2], haskey(pps, x[1]) ? pps[x[1]] : 0.), collect(obs))
-scatter(xs, color=:lightgray, size=(400,400)); plot!(x->x, color=:black, ls=:dot)
+p1 = plot(B[0x0003], label=[L"\log \mu" L"\sigma^2"],
+          xlabel=L"n", color=:black, ls=[:solid :dash], title="(A)")
+hline!(p1, [log(θ)], ls=:dot, color=:black, label="")
+μ, V = B[0x0003][end,:]
+p2 = plot(prior, color=:lightgray, fill=true, size=(300,200), xlabel=L"\theta", 
+          label=L"p(\theta)", title="(B)")
+plot!(ppdf, color=:black, label=L"p(\theta|X)")
+plot!(Normal(μ, √V), color=:black, ls=:dash, label=L"Q(\theta)")
+p3 = plot(xticks=1:3, xlabel=L"G", ylabel=L"P", title="(C)")
+for (i,(k,v)) in enumerate(pps)
+    violin!([i], [v], flyer=false, color=:lightgray, label="")
+    plot!([i-0.5, i+0.5], [obs[k], obs[k]], color=:black, label="")
+end
+plot(p1, p2, p3, size=(700,200), layout=(1,3), bottom_margin=4mm,
+     legend=true, fg_legend=:transparent)
 
-
+# Convergence, posterior approximation and posterior predictive
+# distribution plots
