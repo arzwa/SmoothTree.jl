@@ -21,8 +21,8 @@ Multi-species coalescent distribution over gene trees for a given
 species tree with branch lengths in coalescent units.
 """
 struct MSC{T,Ψ}
-    tree     ::Ψ
-    init     ::Dict{T,Vector{T}}  # species tree node to gene tree leaves
+    tree::Ψ
+    init::Dict{T,Vector{T}}  # species tree node to gene tree leaves
     function MSC(tree::Ψ, init::Dict{T,Vector{T}}) where {Ψ,T}
         tree.data.distance = Inf  # always
         new{T,Ψ}(tree, init)

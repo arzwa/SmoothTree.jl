@@ -178,7 +178,7 @@ get `target` accepted simulations or exceed a total of `maxn`
 simulations. If the number of accepted draws is smaller than `mina`
 the update failed.
 """
-function ep_iteration!(alg, i; mina=10, target=100, maxn=1e5, noisy=true)
+function ep_iteration!(alg, i; mina=10, target=100, maxn=1e5, noisy=false, adhoc=0.)
     @unpack data, model, sites = alg
     x = data[i]
     cavity = isassigned(sites, i) ? getcavity(model, sites[i]) : model
@@ -189,9 +189,9 @@ function ep_iteration!(alg, i; mina=10, target=100, maxn=1e5, noisy=true)
     nacc = n = 0
     while true   # this could be parallelized to some extent using blocks
         n += 1
-        noisy && n % 100 == 0 && (@info n)
         G = randsplits(MSC(S, init))
-        l = logpdf(x, G) 
+        l = logpdf(x, G) + adhoc
+        noisy && n % 1000 == 0 && (@info "$n $l")
         if log(rand()) < l
             noisy && (@info "accepted! ($nacc)")
             push!(accepted, S)

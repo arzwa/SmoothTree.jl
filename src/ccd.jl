@@ -17,6 +17,8 @@
 # case, represented by an arbitrary rooting, we should have that the
 # root split is certain, despite α>1 (this sounds a bit confusing).
 
+# XXX reconsider the taxon map stuff
+
 # aliases
 const DefaultNode{T} = Node{T,NewickData{Float64,String}}
 const Splits{T} = Vector{Tuple{T,T}}
@@ -151,6 +153,24 @@ _ns(n) = 2^(n-1) - 1
 # get the relevant alpha value, this could deal with α depending on
 # clade size?
 getα(ccd::CCD, clade) = clade == ccd.root ? ccd.αroot : ccd.α
+
+# get the modal tree? this uses a greedy algorithm, not sure if
+# guaranteed to give the mode?
+function modetree(ccd::CCD{T}) where T
+    l, splits = _modetree(0., Tuple{T,T}[], ccd, ccd.root)
+end
+
+function _modetree(l, splits, ccd, γ)
+    isleafclade(γ) && return l, splits
+    xs = collect(ccd.smap[γ])
+    i = argmax(last.(xs))
+    δ = xs[i][1]
+    l += _splitp(ccd, γ, δ)
+    push!(splits, (γ, δ))
+    l, splits = _modetree(l, splits, ccd, δ)
+    l, splits = _modetree(l, splits, ccd, γ-δ)
+    return l, splits
+end
 
 # draw a tree from the ccd, simulates a tree as a set of splits
 function randsplits(ccd::CCD{T}) where T

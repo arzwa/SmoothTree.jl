@@ -11,8 +11,9 @@ Sprior = NatBMP(CCD(trees, lmap=tmap, α=5.))
 smple  = ranking(randtree(MomBMP(Sprior), 10000))
 θprior = [SmoothTree.gaussian_mom2nat(log(1.), 5.)...]
 
-#data  = CCD.(data_, lmap=tmap, α=.1)
-data  = CCD.(trees, lmap=tmap, α=.0)
+# we can compare using ML gene trees against acknowledging uncertainty
+data  = CCD.(data_, lmap=tmap, α=.01)
+#data  = CCD.(trees, lmap=tmap, α=.0)
 model = MSCModel(Sprior, θprior)
 alg   = EPABC(data, model, λ=0.5, α=1e-9)
 
@@ -46,5 +47,9 @@ obs = proportionmap(trees)
 xs = map(x->(x[2], haskey(pps, x[1]) ? pps[x[1]] : 0.), collect(obs))
 scatter(xs, color=:lightgray, size=(400,400)); plot!(x->x, color=:black, ls=:dot)
 
-# the posterior predictive distribution for gene trees differs strongly
+# the posterior predictive distribution for gene trees differs strongly.
+# here we see that when we acknowledge gene tree uncertainty, we
+# estimate much less true discordance... posterior predictive
+# simulation suggest that almost 90% of the *true* gene trees matches
+# the species tree.
 

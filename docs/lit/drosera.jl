@@ -3,27 +3,25 @@ using NewickTree, SmoothTree, Serialization
 
 basedir = "/home/arzwa/dev/DroseraGenomeEvolution/data/loci-perfect/trimmed"
 trees = map(readdir("$basedir/ufboot", join=true)) do f
+    @info f
     trees = readnw.(readlines(f))
     trees = SmoothTree.rootall!(trees, "bvu_1")
     SmoothTree.topologize!.(trees)
     countmap(trees)
 end
+
 serialize("$basedir/trees.jls", trees)
 
-data = CCD.(trees, αroot=0., α=0.01)
+tmap = taxonmap(first(trees[1])[1])
+data = CCD.(trees, lmap=tmap, α=0.01)
 
-a = SmoothTree.n_internal(S) - 1
-treeprior = CCD(randtree(data[1], 1), α=100., αroot=0.)
-θprior = MvNormal(zeros(m), 1.)
+mtrees = first.(first.(trees))
+Sprior = NatBMP(CCD(mtrees, α=1.))
+smple  = ranking(randtree(MomBMP(Sprior), 1000))
+θprior = [SmoothTree.gaussian_mom2nat(log(1.), 5.)...]
 
-T = randtree(treeprior)
-x = rand(θprior)
-SmoothTree.setdistance_internal_rooted!(T, exp.(x))
-simm = SmoothTree.MSC(T)
-sims = CCD(simm, randsplits(simm, 10000), α=0.01, αroot=0.)
+model = MSCModel(Sprior, θprior)
+alg   = EPABC(data, model, λ=0.2, α=1e-20)
 
+trace = SmoothTree.ep!(alg, 1, maxn=2e4, mina=5, target=50)
 
-# swap leaf label clade numbers
-function relabel(ccd::CCD, lmap)
-    
-end

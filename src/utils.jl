@@ -1,3 +1,19 @@
+# assumed throughout
+_spname(x::String) = string(split(x, "_")[1])
+_spname(n::Node) = _spname(name(n))
+
+# ranking
+ranking(xs) = sort(collect(proportionmap(xs)), by=last, rev=true)
+
+# remove branch lengths
+function topologize!(tree)
+    for n in postwalk(tree)
+        n.data.distance = NaN
+        n.data.support = NaN
+    end
+    return tree
+end
+
 """
     BiMap{T,V}
 
@@ -100,4 +116,38 @@ function setdistance!(S, θ::Number)
         n.data.distance = θ
     end
 end
+
+function process_data(dpath, outgroup)
+    fnames = readdir(dpath, join=true)
+    map(fnames) do fpath
+        @info fpath
+        ts = readnw.(readlines(fpath))
+        topologize!.(ts)
+        ts = SmoothTree.rootall!(ts, outgroup)
+        countmap(ts)
+    end
+end
+
+# some IO for tree collections...
+writetrees(path, cmaps::Vector) = map(x->writetrees(path, x), cmaps)
+function writetrees(path, cmap::AbstractDict)
+    open(path, "a") do f
+        for (k,v) in sort(collect(cmap), by=last, rev=true)
+            write(f, "$v\t$(nwstr(k))\n")
+        end
+        write(f, "***\n")
+    end
+end
+
+function readtrees(path)
+    content = readchomp(open(path, "r"))
+    content = split(content, "***\n")
+    map(content) do x
+        xs = filter(x->length(x) == 2, map(x->split(x, "\t"), split(x, "\n")))
+        Dict(readnw(string(x[2]))=>parse(Int, x[1]) for x in xs)
+    end
+end
+
+
+
 
