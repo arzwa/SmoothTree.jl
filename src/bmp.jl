@@ -45,6 +45,10 @@ struct MomBMP{T,V} <: AbstractBMP{T,V}
     root::T
 end
 
+# 'empty' BMP (uniform on splits)
+NatBMP(root::T) where T = NatBMP(Dict{T,SparseSplits{T,Float64}}(), root)
+MomBMP(root::T) where T = MomBMP(Dict{T,SparseSplits{T,Float64}}(), root)
+
 # accessors
 Base.show(io::IO, m::M) where M<:AbstractBMP = write(io, "$M(o=$(m.root))")
 Base.haskey(m::AbstractBMP, γ) = haskey(m.smap, γ)

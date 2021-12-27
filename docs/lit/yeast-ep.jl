@@ -17,7 +17,7 @@ data  = CCD.(trees, lmap=tmap, α=.0)
 model = MSCModel(Sprior, θprior, tmap)
 alg   = EPABC(data, model, λ=0.2, α=1e-9)
 
-trace = ep!(alg, 3, maxn=5e4, mina=10, target=100)
+trace = ep!(alg, 3, maxn=5e4, mina=10, target=100, adhoc=false)
 
 X, Y = traceback(trace)
 

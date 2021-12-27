@@ -194,7 +194,7 @@ get `target` accepted simulations or exceed a total of `maxn`
 simulations. If the number of accepted draws is smaller than `mina`
 the update failed.
 """
-function ep_iteration!(alg, i; mina=10, target=100, maxn=1e5, noisy=false, adhoc=0.)
+function _ep_iteration!(alg, i; mina=10, target=100, maxn=1e5, noisy=false, adhoc=0.)
     @unpack data, model, sites = alg
     x = data[i]
     cavity = isassigned(sites, i) ? getcavity(model, sites[i]) : model
@@ -317,4 +317,44 @@ function randinit(x::CCD{T}, tmap, speciesmap) where T
         init[spγ] = [γ]
     end
     return init
+end
+
+# keep top x%
+function ep_iteration!(alg, i; mina=10, target=100, maxn=1e5, noisy=false, adhoc=false)
+    @unpack data, model, sites = alg
+    x = data[i]
+    cavity = isassigned(sites, i) ? getcavity(model, sites[i]) : model
+    S = randsptree(cavity)
+    init = Dict(id(n)=>[id(n)] for n in getleaves(S))
+    # XXX the init is where the gene to species mapping happens!
+    sims = Tuple{Float64,typeof(S)}[]
+    accepted = Tuple{Float64,typeof(S)}[]
+    nacc = n = 0
+    while true   # this could be parallelized to some extent using blocks
+        n += 1
+        G = randsplits(MSC(S, init))
+        l = logpdf(x, G)
+        noisy && n % 1000 == 0 && (@info "$n $l")
+        if log(rand()) < l
+            nacc += 1
+            noisy && (@info "accepted! $l ($nacc)")
+            push!(accepted, (l, S))
+        else
+            push!(sims, (l, S))
+        end
+        (n ≥ maxn || nacc ≥ target) && break
+        S = randsptree(cavity)
+    end
+    if nacc < mina && !adhoc 
+        return false, nacc, n, alg.model, cavity
+    elseif nacc < mina  # fill up
+        top = sort(sims, by=first, rev=true)[1:(mina-nacc)]
+        noisy && (@info "added top $(mina-nacc), <ℓ>=$(mean(first.(top)))")
+        push!(accepted, top...)
+    end
+    acc_S = last.(accepted)
+    acc_l = first.(accepted)
+    model_ = updated_model(acc_S, model, cavity, alg)
+    site_  = new_site(model_, cavity)
+    return true, nacc, n, model_, site_
 end

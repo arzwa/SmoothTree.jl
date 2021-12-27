@@ -6,6 +6,7 @@ _spname(n::Node) = _spname(name(n))
 ranking(xs) = sort(collect(proportionmap(xs)), by=last, rev=true)
 
 # remove branch lengths
+topologize(tree) = topologize!(deepcopy(tree))
 function topologize!(tree)
     for n in postwalk(tree)
         n.data.distance = NaN

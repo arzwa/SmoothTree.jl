@@ -2,7 +2,7 @@ using Pkg; Pkg.activate(@__DIR__)
 using SmoothTree, Test, NewickTree
 using StatsBase, Distributions, Plots
 using Serialization
-using LaTeXStrings, StatsPlots
+using LaTeXStrings, StatsPlots, Measures
 default(gridstyle=:dot, legend=false, framestyle=:box, title_loc=:left, titlefont=7)
 
 function getcladeθ(S, m)
@@ -18,15 +18,17 @@ function getcladeθ(S, m)
     return d
 end
 
-S = nw"(((((A,B),C),(D,E)),(F,(G,H))),O);"
-S = nw"((((((((A,B),C),(D,E)),(F,(G,H))),I),(J,K)),L),O);"
-#S = readnw(readline("docs/data/mammals-song/mltrees.nw"))
-#S = readnw(nwstr(S[1][1][2][1][1]), UInt64)
+#T = UInt16
+#S = nw"(((((A,B),C),(D,E)),(F,(G,H))),O);"
+#S = nw"((((((((A,B),C),(D,E)),(F,(G,H))),I),(J,K)),L),O);"
+S = readnw(readline("docs/data/mammals-song/mltrees.nw"))
+T = UInt64
+S = readnw(nwstr(S[1][1][2][1][1]), T)
 ntaxa = length(getleaves(S))
 m = SmoothTree.n_internal(S)
 θ = exp.(rand(Normal(1,1), m))
 SmoothTree.setdistance_internal!(S, θ)
-m = taxonmap(S)
+m = taxonmap(S, T)
 d = getcladeθ(S, m)
 M = SmoothTree.MSC(S, m)
 n = 100
@@ -34,49 +36,97 @@ G = randtree(M, m, n)
 ranking(G)
 
 #Sprior = NatBMP(CCD(G, lmap=m, α=10.))
-Sprior = NatBMP(CCD(G, lmap=m, α=0.1))
-#Sprior = NatBMP(CCD(G, lmap=m, α=0.01))
-smple  = ranking(randtree(MomBMP(Sprior), 10000))
-θprior = [SmoothTree.gaussian_mom2nat(log(1.), 5.)...]
+Sprior = NatBMP(CCD(G, lmap=m, α=1.))
+#Sprior = NatBMP(CCD(G, lmap=m, α=0.1))
+smple  = last.(ranking(randtree(MomBMP(Sprior), 10000)))
+root = T(2^ntaxa - 1)
+#Sprior = NatBMP(root)
+priormean = 1.
+priorvar  = 5.
+θprior = [SmoothTree.gaussian_mom2nat(log(priormean), priorvar)...]
 
 data  = CCD.(G, lmap=m, α=1/2^(ntaxa-1))
 model = MSCModel(Sprior, θprior, m)
 alg   = EPABC(data, model, λ=0.2, α=1/2^(ntaxa-1))
 
-_ = SmoothTree.ep_iteration!(alg, 1, maxn=1e5, mina=5, target=100, noisy=true)
+#_ = SmoothTree.ep_iteration!(alg, 1, maxn=1e5, mina=10, target=100, noisy=true, adhoc=true)
 
 # EP
-trace = ep!(alg, 3, maxn=1e5, mina=5, target=100)
+trace = ep!(alg, 3, maxn=1e5, mina=10, target=100, adhoc=true)
 
 # Analysis
 X, Y = traceback(trace)
 
 xs = filter(x->size(x[2], 2) > 1, collect(X))
 map(xs) do (k, x)
-    p1 = plot(x, title="clade $(bitstring(k)[end-7:end])", xscale=:log10)
+    p1 = plot(x, title="clade $(bitstring(k)[end-7:end])")#, xscale=:log10)
     p2 = plot(Y[k])
     plot(p1, p2)
 end |> x-> plot(x..., size=(1200,500))
 
-smple  = ranking(randtree(SmoothTree.MomBMP(trace[end].S), 10000))
+smple = ranking(randtree(alg.model.S, 10000))
 
 SmoothTree.relabel(first(smple)[1], m)
+SmoothTree.topologize(S)
 
+# log scale
 mapS = first(smple)[1]
 clades = filter(n->!SmoothTree.isleafclade(n), id.(postwalk(mapS)))[1:end-1]
-map(clades) do g
+p = map(clades) do g
     lm, V = Y[g][end,:]
-    plot(Normal(lm, √V))
-    vline!([log(d[g])])
-end |> x->plot(x...)
+    plot(Normal(log(priormean), √priorvar), color=:lightgray,
+         fill=true, xlim=(-4.5,4.5), yticks=false, grid=false)
+    plot!(Normal(lm, √V), color=:black)
+    vline!([log(d[g])], color=:black, ls=:dot)
+end |> x->plot(x...) #,layout=(3,5), size=(600,300))
+#xlabel!(p.subplots[13], L"\theta")
+#plot(p, bottom_margin=1.5mm)
+#savefig("docs/img/17taxa-posterior.pdf")
 
-obs = ranking(G)
+# posterior prediction
 pps = map(1:1000) do rep
     S = SmoothTree.randsptree(trace[end])
     M = SmoothTree.MSC(S, Dict(id(n)=>[id(n)] for n in getleaves(S)))
     pps = proportionmap(randtree(M, m, length(G)))
-    xs = map(x->haskey(pps, x[1]) ? pps[x[1]] : 0., obs)
-end |> x->permutedims(hcat(x...))
-boxplot(pps, linecolor=:black, fillcolor=:lightgray, outliers=false)
-scatter!(last.(obs), color=:black)
+end
+
+function merge_pmaps(xs)
+    ks = union(keys.(xs)...)
+    d = Dict(k=>zeros(length(xs)) for k in ks)
+    for i in 1:length(xs)
+        for (k,v) in xs[i]
+            d[k][i] = v
+        end
+    end
+    return d
+end
+
+pms = merge_pmaps(pps)
+
+obs = proportionmap(G)
+top = sort(collect(pms), by=x->mean(last(x)), rev=true)[1:50]
+topts = Set(first.(top))
+for (k, v) in obs
+    if k ∉ topts
+        if haskey(pms, k)
+            push!(top, (k=>pms[k]))
+        else
+            push!(top, (k=>zeros(1)))
+        end
+    end
+end
+
+ppds = last.(top)
+p = plot(xlabel="tree", ylabel="frequency") 
+#boxplot(ppds, linecolor=:black, fillcolor=:lightgray, outliers=false)
+map(enumerate(ppds)) do (i, ps)
+    plot!(p, [i, i], quantile(ps, [0.025, 0.975]), color=:black)
+end
+for (i,k) in enumerate(first.(top))
+    if haskey(obs, k)
+        scatter!((i,obs[k]), color=:orange)
+    end
+end
+plot(p)
+#savefig("17taxa-pps.pdf")
 
