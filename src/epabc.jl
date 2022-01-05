@@ -56,20 +56,6 @@ function EPABC(data, model::T; λ=1., α=0.1) where T
     EPABC(data, model, sites, λ, α)
 end
 
-mutable struct MULEPABC{X,M} <: AbstractEPABC
-    data ::X
-    model::M
-    sites::Vector{M}
-    λ    ::Float64  # for damped update...
-    α    ::Float64  # Dirichlet-BMP parameter for 'moment matching'
-    speciesmap::Dict{String,Vector{String}}  # maps species name -> subgenomes
-end
-
-function MULEPABC(data, model::T, speciesmap; λ=1., α=0.1) where T
-    sites = Vector{T}(undef, length(data))
-    MULEPABC(data, model, sites, λ, α, speciesmap)
-end
-
 # 1. We need a method to form the cavity density
 # it should not be a problem that this modifies the full approximation
 function getcavity(full::MSCModel{T,V,W}, site) where {T,V,W}
@@ -192,35 +178,75 @@ new_site(new_full, cavity) = getcavity(new_full, cavity)
 Do an EP-ABC update for data point i, conducting simulations until we
 get `target` accepted simulations or exceed a total of `maxn`
 simulations. If the number of accepted draws is smaller than `mina`
-the update failed.
+the update failed, unless `fillup=true`, in which case the top `n`
+simulations are added to the accepted replicates until `mina`
+simulation replicates are obtained.
 """
-function _ep_iteration!(alg, i; mina=10, target=100, maxn=1e5, noisy=false, adhoc=0.)
+function ep_iteration!(alg, i; mina=10, target=100, maxn=1e5, noisy=false, fillup=false)
     @unpack data, model, sites = alg
     x = data[i]
     cavity = isassigned(sites, i) ? getcavity(model, sites[i]) : model
     S = randsptree(cavity)
     init = Dict(id(n)=>[id(n)] for n in getleaves(S))
     # XXX the init is where the gene to species mapping happens!
-    accepted = typeof(S)[]
+    sims = Tuple{Float64,typeof(S)}[]
+    accepted = Tuple{Float64,typeof(S)}[]
     nacc = n = 0
     while true   # this could be parallelized to some extent using blocks
         n += 1
         G = randsplits(MSC(S, init))
-        l = logpdf(x, G) + adhoc
+        l = logpdf(x, G)
         noisy && n % 1000 == 0 && (@info "$n $l")
         if log(rand()) < l
-            noisy && (@info "accepted! ($nacc)")
-            push!(accepted, S)
             nacc += 1
+            noisy && (@info "accepted! $l ($nacc)")
+            push!(accepted, (l, S))
+        else
+            push!(sims, (l, S))
         end
         (n ≥ maxn || nacc ≥ target) && break
         S = randsptree(cavity)
     end
-    nacc < mina && return false, nacc, n, alg.model, cavity
-    model_ = updated_model(accepted, model, cavity, alg)
+    if nacc < mina && !fillup
+        return false, nacc, n, alg.model, cavity
+    elseif nacc < mina  # fill up
+        top = sort(sims, by=first, rev=true)[1:(mina-nacc)]
+        noisy && (@info "added top $(mina-nacc), <ℓ>=$(mean(first.(top)))")
+        push!(accepted, top...)
+    end
+    acc_S = last.(accepted)
+    acc_l = first.(accepted)
+    model_ = updated_model(acc_S, model, cavity, alg)
     site_  = new_site(model_, cavity)
     return true, nacc, n, model_, site_
 end
+#function ep_iteration!(alg, i; mina=10, target=100, maxn=1e5, noisy=false, adhoc=0.)
+#    @unpack data, model, sites = alg
+#    x = data[i]
+#    cavity = isassigned(sites, i) ? getcavity(model, sites[i]) : model
+#    S = randsptree(cavity)
+#    init = Dict(id(n)=>[id(n)] for n in getleaves(S))
+#    # XXX the init is where the gene to species mapping happens!
+#    accepted = typeof(S)[]
+#    nacc = n = 0
+#    while true   # this could be parallelized to some extent using blocks
+#        n += 1
+#        G = randsplits(MSC(S, init))
+#        l = logpdf(x, G) + adhoc
+#        noisy && n % 1000 == 0 && (@info "$n $l")
+#        if log(rand()) < l
+#            noisy && (@info "accepted! ($nacc)")
+#            push!(accepted, S)
+#            nacc += 1
+#        end
+#        (n ≥ maxn || nacc ≥ target) && break
+#        S = randsptree(cavity)
+#    end
+#    nacc < mina && return false, nacc, n, alg.model, cavity
+#    model_ = updated_model(accepted, model, cavity, alg)
+#    site_  = new_site(model_, cavity)
+#    return true, nacc, n, model_, site_
+#end
 
 """
     ep_pass!(alg; k=1, kwargs...)
@@ -276,85 +302,3 @@ function traceback(trace)
     return c, θ
 end
 
-
-function ep_iteration!(alg::MULEPABC, i; mina=10, target=100,
-                       maxn=1e5, noisy=false, adhoc=0.)
-    @unpack data, model, sites = alg
-    x = data[i]
-    cavity = isassigned(sites, i) ? getcavity(model, sites[i]) : model
-    S = randsptree(cavity)
-    # XXX the init is where the gene to species mapping happens!
-    accepted = typeof(S)[]
-    nacc = n = 0
-    while true   # this could be parallelized to some extent using blocks
-        n += 1
-        init = randinit(x, model.m, alg.speciesmap)
-        G = randsplits(MSC(S, init))
-        l = logpdf(x, G) + adhoc
-        noisy && n % 1000 == 0 && (@info "$n $l")
-        if log(rand()) < l
-            noisy && (@info "accepted! ($nacc)")
-            push!(accepted, S)
-            nacc += 1
-        end
-        (n ≥ maxn || nacc ≥ target) && break
-        S = randsptree(cavity)
-    end
-    nacc < mina && return false, nacc, n, alg.model, cavity
-    model_ = updated_model(accepted, model, cavity, alg)
-    site_  = new_site(model_, cavity)
-    return true, nacc, n, model_, site_
-end
-
-function randinit(x::CCD{T}, tmap, speciesmap) where T
-    # sample subgenomes without replacement!
-    urn = Dict(x=>shuffle(y) for (x,y) in speciesmap)
-    init = Dict{T,Vector{T}}()
-    for (γ, gene) in x.lmap
-        species = _spname(gene)
-        subgenome = pop!(urn[species])
-        spγ = tmap[subgenome]
-        init[spγ] = [γ]
-    end
-    return init
-end
-
-# keep top x%
-function ep_iteration!(alg, i; mina=10, target=100, maxn=1e5, noisy=false, adhoc=false)
-    @unpack data, model, sites = alg
-    x = data[i]
-    cavity = isassigned(sites, i) ? getcavity(model, sites[i]) : model
-    S = randsptree(cavity)
-    init = Dict(id(n)=>[id(n)] for n in getleaves(S))
-    # XXX the init is where the gene to species mapping happens!
-    sims = Tuple{Float64,typeof(S)}[]
-    accepted = Tuple{Float64,typeof(S)}[]
-    nacc = n = 0
-    while true   # this could be parallelized to some extent using blocks
-        n += 1
-        G = randsplits(MSC(S, init))
-        l = logpdf(x, G)
-        noisy && n % 1000 == 0 && (@info "$n $l")
-        if log(rand()) < l
-            nacc += 1
-            noisy && (@info "accepted! $l ($nacc)")
-            push!(accepted, (l, S))
-        else
-            push!(sims, (l, S))
-        end
-        (n ≥ maxn || nacc ≥ target) && break
-        S = randsptree(cavity)
-    end
-    if nacc < mina && !adhoc 
-        return false, nacc, n, alg.model, cavity
-    elseif nacc < mina  # fill up
-        top = sort(sims, by=first, rev=true)[1:(mina-nacc)]
-        noisy && (@info "added top $(mina-nacc), <ℓ>=$(mean(first.(top)))")
-        push!(accepted, top...)
-    end
-    acc_S = last.(accepted)
-    acc_l = first.(accepted)
-    model_ = updated_model(acc_S, model, cavity, alg)
-    site_  = new_site(model_, cavity)
-    return true, nacc, n, model_, site_
-end

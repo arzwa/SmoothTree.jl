@@ -2,8 +2,9 @@ using Pkg; Pkg.activate(@__DIR__)
 using SmoothTree, Test, NewickTree
 using StatsBase, Distributions, Plots
 using Serialization
-using LaTeXStrings, StatsPlots
-default(gridstyle=:dot, legend=false, framestyle=:box, title_loc=:left, titlefont=7)
+using LaTeXStrings, StatsPlots, Measures
+default(gridstyle=:dot, legend=false, framestyle=:box,
+        title_loc=:left, titlefont=7)
 
 # Three-taxon case
 # Species tree S = ((A,B),C)
@@ -78,15 +79,15 @@ end
 S = readnw("((B:Inf,C:Inf):$θ,A:Inf);")
 m = SmoothTree.taxonmap(S)
 M = SmoothTree.MSC(S, m)
-n = 100
-Y = randtree(M, m, n)
+N = 100
+Y = randtree(M, m, N)
 X = countmap(Y)
 G = triples(X, m)
+prior = Normal(log(1.), √5.)
 
 # get posterior probs by integration
 using QuadGK
 trees = collect(keys(X))
-prior = Normal()
 ls = map(tree->marginal_lhood(G, tree, m, prior), trees)
 pp = ls ./ sum(ls)
 pp = Dict(t=>p for (t,p) in zip(trees, pp))
@@ -96,9 +97,9 @@ Sprior = NatBMP(CCD(trees, lmap=m, α=1.))
 smple  = ranking(randtree(MomBMP(Sprior), 10000))
 θprior = [SmoothTree.gaussian_mom2nat(log(1.), 5.)...]
 data  = CCD.(Y, lmap=m, α=0.)
-model = MSCModel(Sprior, θprior)
+model = MSCModel(Sprior, θprior, m)
 alg   = EPABC(data, model, λ=0.1, α=1e-9)
-trace = ep!(alg, 10, maxn=1e5, mina=200, target=200);
+trace = ep!(alg, 10, maxn=1e5, mina=100, target=500);
 smple = SmoothTree.ranking(randtree(SmoothTree.MomBMP(trace[end].S), 10000))
 
 combine(xs::Vector{<:Dict}) = Dict(k=>[x[k] for x in xs] for k in keys(xs[1]))
@@ -113,17 +114,23 @@ p1 = plot(B[0x0003], label=[L"\log \mu" L"\sigma^2"],
           xlabel=L"n", color=:black, ls=[:solid :dash], title="(A)")
 hline!(p1, [log(θ)], ls=:dot, color=:black, label="")
 μ, V = B[0x0003][end,:]
-p2 = plot(prior, color=:lightgray, fill=true, size=(300,200), xlabel=L"\theta", 
-          label=L"p(\theta)", title="(B)")
-plot!(ppdf, color=:black, label=L"p(\theta|X)")
-plot!(Normal(μ, √V), color=:black, ls=:dash, label=L"Q(\theta)")
+p2 = plot(prior, color=:lightgray, fill=true, size=(300,200),
+          xlabel=L"\theta", label=L"p(\theta)", title="(B)",
+          xlim=(-2.5,2.5), alpha=0.5)
+plot!(ppdf, color=:gray, fillalpha=0.5, fill=true, linealpha=0.,
+      label=L"p(\theta|X)")
+plot!(Normal(μ, √V), color=:black, label=L"Q(\theta)")
+vline!([log(θ)], ls=:dot, color=:black, label="")
 p3 = plot(xticks=1:3, xlabel=L"G", ylabel=L"P", title="(C)")
 for (i,(k,v)) in enumerate(pps)
     violin!([i], [v], flyer=false, color=:lightgray, label="")
     plot!([i-0.5, i+0.5], [obs[k], obs[k]], color=:black, label="")
 end
 plot(p1, p2, p3, size=(700,200), layout=(1,3), bottom_margin=4mm,
-     legend=true, fg_legend=:transparent)
+     legend=true, fg_legend=:transparent, dpi=300)
+
+savefig("docs/img/threetaxon.pdf")
+savefig("docs/img/threetaxon.png")
 
 # Convergence, posterior approximation and posterior predictive
 # distribution plots

@@ -18,41 +18,46 @@ function getcladeθ(S, m)
     return d
 end
 
-#T = UInt16
-#S = nw"(((((A,B),C),(D,E)),(F,(G,H))),O);"
-#S = nw"((((((((A,B),C),(D,E)),(F,(G,H))),I),(J,K)),L),O);"
-S = readnw(readline("docs/data/mammals-song/mltrees.nw"))
-T = UInt64
-S = readnw(nwstr(S[1][1][2][1][1]), T)
+# Note, if one assumes θ ~ Gamma(α, 1/β), then E[exp(-θ)] = (1+1/β)^-k
+# (from the mgf), which is approximately exp(-E[θ])
+
+T = UInt16
+S = nw"(((((A,B),C),(D,E)),(F,(G,H))),(I,J));"
+#S = nw"(((((((((A,B),C),(D,E)),(F,(G,H))),I),(J,K)),L),M),(O,P));"
+#S = readnw(readline("docs/data/mammals-song/mltrees.nw"))
+#T = UInt64
+#S = readnw(nwstr(S[1][1][2][1][1]), T)
+#S = readnw(nwstr(S[1][1][2][1]), T)
 ntaxa = length(getleaves(S))
-m = SmoothTree.n_internal(S)
-θ = exp.(rand(Normal(1,1), m))
+l = SmoothTree.n_internal(S)
+#θ = rand(LogNormal(log(3.), 0.5), l)
+θ = rand(Gamma(4., 1/2), l)
 SmoothTree.setdistance_internal!(S, θ)
 m = taxonmap(S, T)
 d = getcladeθ(S, m)
 M = SmoothTree.MSC(S, m)
 n = 100
 G = randtree(M, m, n)
-ranking(G)
+ranking(G) .|> last
 
 #Sprior = NatBMP(CCD(G, lmap=m, α=10.))
-Sprior = NatBMP(CCD(G, lmap=m, α=1.))
-#Sprior = NatBMP(CCD(G, lmap=m, α=0.1))
-smple  = last.(ranking(randtree(MomBMP(Sprior), 10000)))
+#Sprior = NatBMP(CCD(G, lmap=m, α=1.))
+#Sprior = NatBMP(CCD(G, lmap=m, α=1e-4))
+#smple  = last.(ranking(randtree(MomBMP(Sprior), 10000)))
 root = T(2^ntaxa - 1)
-#Sprior = NatBMP(root)
+Sprior = NatBMP(root)
 priormean = 1.
 priorvar  = 5.
 θprior = [SmoothTree.gaussian_mom2nat(log(priormean), priorvar)...]
 
 data  = CCD.(G, lmap=m, α=1/2^(ntaxa-1))
 model = MSCModel(Sprior, θprior, m)
-alg   = EPABC(data, model, λ=0.2, α=1/2^(ntaxa-1))
+alg   = EPABC(data, model, λ=0.1, α=0.01) #1/2^(ntaxa-1))
 
 #_ = SmoothTree.ep_iteration!(alg, 1, maxn=1e5, mina=10, target=100, noisy=true, adhoc=true)
 
 # EP
-trace = ep!(alg, 3, maxn=1e5, mina=10, target=100, adhoc=true)
+trace = ep!(alg, 3, maxn=1e4, mina=100, target=100, fillup=true)
 
 # Analysis
 X, Y = traceback(trace)
@@ -66,8 +71,8 @@ end |> x-> plot(x..., size=(1200,500))
 
 smple = ranking(randtree(alg.model.S, 10000))
 
-SmoothTree.relabel(first(smple)[1], m)
 SmoothTree.topologize(S)
+SmoothTree.relabel(first(smple)[1], m)
 
 # log scale
 mapS = first(smple)[1]

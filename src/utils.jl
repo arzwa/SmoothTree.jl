@@ -55,6 +55,19 @@ function taxonmap(l::Vector{String}, T=UInt16)
     return BiMap(d)
 end
 
+function getsplits(tree, m::BiMap{K,V}) where {K,V}
+    splits = Tuple{K,K}[]
+    _getsplits(splits, tree, m)
+    return splits
+end
+function _getsplits(splits, n, m)
+    isleaf(n) && return m[name(n)]
+    a = _getsplits(splits, n[1], m)
+    b = _getsplits(splits, n[2], m)
+    push!(splits, (a + b, max(a,b)))
+    return a + b
+end
+
 # relabel a tree based on an id<=>string map
 relabel(tree, m) = relabel!(deepcopy(tree), m)
 function relabel!(tree, m)

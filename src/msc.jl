@@ -40,6 +40,7 @@ function randsplits(model::MSC{T}) where T
     return splits
 end
 
+# TODO, write non-recursive simulator
 # recursively sample from the MSC, storing the splits
 function _coalsplits(n, splits, states)
     isleaf(n) && return _censoredcoalsplits!(splits, distance(n), states[id(n)])
