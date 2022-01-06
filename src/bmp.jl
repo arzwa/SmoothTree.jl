@@ -46,8 +46,22 @@ struct MomBMP{T,V} <: AbstractBMP{T,V}
 end
 
 # 'empty' BMP (uniform on splits)
-NatBMP(root::T) where T = NatBMP(Dict{T,SparseSplits{T,Float64}}(), root)
-MomBMP(root::T) where T = MomBMP(Dict{T,SparseSplits{T,Float64}}(), root)
+NatBMP(root::T) where T<:Integer = NatBMP(Dict{T,SparseSplits{T,Float64}}(), root)
+MomBMP(root::T) where T<:Integer = MomBMP(Dict{T,SparseSplits{T,Float64}}(), root)
+
+# BMP with fixed outgroup, note we do not the P to exactly 1, because
+# that leads to ill-defined NatBMPs
+function MomBMP(root::T, rootsplit::T, ϵ=1e-16) where T
+    split = min(rootsplit, root - rootsplit)
+    d = Dict(split => 1. - ϵ)
+    ρ = refsplit(root)
+    n = _ns(cladesize(root))
+    η0 = ϵ/(n-1)
+    roots = SparseSplits(d, n, 1, η0, ρ)
+    MomBMP(Dict(root=>roots), root)
+end
+
+NatBMP(root, rootsplit) = NatBMP(MomBMP(root, rootsplit))
 
 # accessors
 Base.show(io::IO, m::M) where M<:AbstractBMP = write(io, "$M(o=$(m.root))")
@@ -206,4 +220,69 @@ function _convexcombination(x::SparseSplits{T,V}, λ) where {T,V}
     d = Dict(k=>λ*η for (k,η) in x.splits)
     SparseSplits(d, x.n, x.k, λ*x.η0, x.ref) 
 end
+
+"""
+    prune
+
+Prune a sparsely represented BMP object by setting all represented
+splits with split probabilities indistinguishable from the probability
+of an unrepresented split to the latter (thereby removinng the split
+from the set of explicitly represented splits).
+"""
+function prune(x::AbstractBMP{T,V}; atol=1e-9) where {T,V}
+    newd = Dict{T,SparseSplits{T,V}}()
+    for (γ, x) in x.smap
+        newd[γ] = _prune(x, atol)
+    end
+    return typeof(x)(newd, x.root)
+end
+
+function _prune(x::SparseSplits{T,V}, atol=1e-9) where {T,V}
+    d = Dict{T,V}()
+    for (k,v) in x.splits
+        isapprox(v, x.η0, atol=atol) && continue
+        d[k] = v
+    end 
+    SparseSplits(d, x.n, length(d), x.η0, x.ref) 
+end
+
+# NatBMP is a vector in a real vector space
+# Scalar multiplication
+function Base.:*(x::NatBMP{T,V}, a::V) where {T,V}
+    d = Dict{T,SparseSplits{T,V}}()
+    for (γ, v) in x.smap
+        d[γ] = v * a
+    end
+    NatBMP(d, x.root)
+end
+
+function Base.:*(x::SparseSplits{T,V}, a::V) where {T,V}
+    d = Dict(γ => η * a for (γ, η) in x.splits)    
+    SparseSplits(d, x.n, x.k, a*x.η0, x.ref)
+end
+
+# Vector addition
+function Base.:+(x::NatBMP{T,V}, y::NatBMP{T,V}) where {T,V}
+    d = Dict{T,SparseSplits{T,V}}()
+    clades = union(keys(x.smap), keys(y.smap))
+    for γ in clades
+        if haskey(x, γ) && haskey(y, γ)
+            d[γ] = x[γ] + y[γ]
+        elseif haskey(x, γ)
+            d[γ] = x[γ]
+        else
+            d[γ] = y[γ]
+        end
+    end
+    NatBMP(d, x.root) 
+end
+
+function Base.:+(x::SparseSplits{T,V}, y::SparseSplits{T,V}) where {T,V}
+    d = Dict(γ => η for (γ, η) in x.splits)    
+    for (k, v) in y.splits
+        haskey(d, k) ? d[k] += v : d[k] = v
+    end
+    SparseSplits(d, x.n, length(d), x.η0 + y.η0, x.ref)
+end
+
 

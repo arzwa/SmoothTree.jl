@@ -1,23 +1,25 @@
 using Pkg; Pkg.activate(@__DIR__)
 using SmoothTree, Test, NewickTree
-using StatsBase, Distributions, Plots
+using StatsBase, Distributions, Plots, StatsPlots
 using Serialization
 default(gridstyle=:dot, legend=false, framestyle=:box, title_loc=:left, titlefont=7)
 data_ = deserialize("docs/data/yeast-rokas/ccd-ufboot.jls")
 trees = readnw.(readlines("docs/data/yeast.mltrees"))
 tmap = SmoothTree.taxonmap(trees[1])
 
-Sprior = NatBMP(CCD(trees, lmap=tmap, α=5.))
+root = UInt16(sum(keys(tmap)))
+Sprior = NatBMP(root, tmap["Calb"])
+#Sprior = NatBMP(CCD(trees, lmap=tmap, α=5.))
 smple  = ranking(randtree(MomBMP(Sprior), 10000))
 θprior = [SmoothTree.gaussian_mom2nat(log(1.), 5.)...]
 
 # we can compare using ML gene trees against acknowledging uncertainty
-#data  = CCD.(data_, lmap=tmap, α=.01)
-data  = CCD.(trees, lmap=tmap, α=.0)
+data  = CCD.(data_, lmap=tmap, α=.01)
+#data  = CCD.(trees, lmap=tmap, α=.0)
 model = MSCModel(Sprior, θprior, tmap)
-alg   = EPABC(data, model, λ=0.2, α=1e-9)
+alg   = EPABC(data, model, λ=0.05, α=1e-9)
 
-trace = ep!(alg, 3, maxn=5e4, mina=10, target=100, adhoc=false)
+trace = ep!(alg, 2, maxn=1e4, mina=100, target=100, fillup=true)
 
 X, Y = traceback(trace)
 
@@ -28,7 +30,18 @@ map(xs) do (k, x)
     plot(p1, p2)
 end |> x-> plot(x..., size=(1200,500))
 
-smple  = SmoothTree.ranking(randtree(SmoothTree.MomBMP(trace[end].S), 10000))
+pq = trace[end].q
+p = plot()
+for (k,v) in pq.cmap
+    v[1] == NaN && continue
+    m, V = SmoothTree.gaussian_nat2mom(v...)
+    plot!(Normal(m, √V))
+end
+plot(p)
+
+pS = SmoothTree.MomBMP(trace[end].S)
+smple = SmoothTree.ranking(randtree(pS, 10000))
+SmoothTree.relabel(last(smple)[1], tmap)
 
 maxtree = SmoothTree.ranking(randtree(CCD(trees), 1000))[1][1]
 ultimate_clades = map(SmoothTree.getclades(maxtree)) do x

@@ -68,6 +68,9 @@ function _getsplits(splits, n, m)
     return a + b
 end
 
+getclade(m::BiMap{T}, clade::Vector{String}) where T = 
+    T(sum([m[x] for x in clade]))
+
 # relabel a tree based on an id<=>string map
 relabel(tree, m) = relabel!(deepcopy(tree), m)
 function relabel!(tree, m)

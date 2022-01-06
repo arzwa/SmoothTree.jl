@@ -12,6 +12,7 @@ include("ccd.jl")
 include("bmp.jl")
 include("msc.jl")
 include("nni.jl")
+include("branchmodel.jl")
 include("epabc.jl")
 
 end # module
