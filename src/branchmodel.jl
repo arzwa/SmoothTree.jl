@@ -1,8 +1,8 @@
 # Hold for each clade, potentially, the natural parameters of a
 # Gaussian, but only store explicitly when distinct from the prior.
 struct BranchModel{T,V}
-    cmap ::Dict{T,V}  # clade => natural parameter 
-    prior::V  # natural parameter for prior
+    cmap ::Dict{T,Vector{V}}  # clade => natural parameter 
+    prior::Vector{V} # natural parameter for prior
 end
 
 # initialize an empty branchmodel object
@@ -10,7 +10,7 @@ BranchModel(x::NatBMP{T}, prior::V) where {T,V} = BranchModel(Dict{T,V}(), prior
 
 # get the cavity distribution
 function cavity(qfull::BranchModel{T,V}, qsite) where {T,V}
-    qcav = Dict{T,V}()
+    qcav = Dict{T,Vector{V}}()
     for (clade, η) in qfull.cmap
         qcav[clade] = haskey(qsite, clade) ? η - qsite[clade] : η
     end 
@@ -46,7 +46,7 @@ gaussian_mom2nat(μ , V ) = (μ/V, -1.0/(2V))
 
 # moment matching
 function approximate_tilted(trees, qcavity::BranchModel{T,V}) where {T,V}
-    d = Dict{T,V}()
+    d = Dict{T,Vector{V}}()
     # obtain moment estimates
     for tree in trees 
         _record_branchparams!(d, tree)
@@ -97,40 +97,21 @@ function _mom2nat(xs, xsqs, N)
     [gaussian_mom2nat(μ, V)...]
 end
 
-# is this correct? I don't think so, unrepresented clades should
-# result in a contribution from the prior, but that contribution
-# should be damped like the represented sites...
+# Vector algebra
+# if a clade is not present, it means that its branch length
+# distribution is given by the prior
 function Base.:+(x::BranchModel{T,V}, y::BranchModel{T,V}) where {T,V}
     clades = union(keys(x.cmap), keys(y.cmap))
-    d = Dict{T,V}(γ=>zeros(2) for γ in clades)
+    d = Dict(γ=>zeros(2) for γ in clades)
     for γ in clades
-        haskey(x, γ) && (d[γ] .+= x[γ])
-        haskey(y, γ) && (d[γ] .+= y[γ])
+        d[γ] .+= haskey(x, γ) ? x[γ] : x.prior
+        d[γ] .+= haskey(y, γ) ? y[γ] : y.prior
     end
-    return BranchModel(d, x.prior)
+    return BranchModel(d, x.prior .+ y.prior)
 end
 
-# split this in a moment matching step and a convexcombination step...
-#function newbranches(accepted_trees, fullq, cavityq, λ)
-#    d = typeof(fullq.cmap)()
-#    N = length(accepted_trees)
-#    # obtain moment estimates
-#    for tree in accepted_trees
-#        _record_branchparams!(d, tree)
-#    end
-#    # add unrepresented prior samples (do or don't?)
-#    _cavity_contribution!(d, cavityq, N)
-#    # update natural params of full approx by moment matching
-#    q′ = updated_q(d, fullq, N, λ)
-#    return BranchModel(q′, fullq.prior)
-#end
-
-#function updated_q(d, q, λ)
-#    q′ = Dict(γ => _mom2nat(x[2], x[3], x[1]) for (γ, x) in d)
-#    for (γ, x) in q′ # convex combination in η space (damped update)
-#        y = haskey(q, γ) ? q[γ] : q.prior
-#        q′[γ] = ((1-λ) .* y) .+ (λ .* x)
-#    end
-#    return q′
-#end
+function Base.:*(x::BranchModel{T,V}, a::V) where {T,V}
+    d = Dict(γ=>a*v for (γ, v) in x.cmap)
+    BranchModel(d, a*x.prior)
+end
 

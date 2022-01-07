@@ -28,6 +28,9 @@ Base.show(io::IO, m::MSCModel) = write(io, "$(typeof(m))")
 # initialize a MSCModel
 MSCModel(x::NatBMP, θprior, m) = MSCModel(x, BranchModel(x, θprior), m)
 
+Base.:+(x::MSCModel, y::MSCModel) = MSCModel(x.S + y.S, x.q + y.q, x.m)
+Base.:*(x::MSCModel, a) = MSCModel(x.S * a, x.q * a, x.m)
+
 """
     getcavity(full, site)
 

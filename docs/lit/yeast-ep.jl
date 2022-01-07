@@ -11,7 +11,7 @@ root = UInt16(sum(keys(tmap)))
 Sprior = NatBMP(root, tmap["Calb"])
 #Sprior = NatBMP(CCD(trees, lmap=tmap, α=5.))
 smple  = ranking(randtree(MomBMP(Sprior), 10000))
-θprior = [SmoothTree.gaussian_mom2nat(log(1.), 5.)...]
+θprior = [SmoothTree.gaussian_mom2nat(log(1.), √5)...]
 
 # we can compare using ML gene trees against acknowledging uncertainty
 data  = CCD.(data_, lmap=tmap, α=.01)
@@ -19,23 +19,18 @@ data  = CCD.(data_, lmap=tmap, α=.01)
 model = MSCModel(Sprior, θprior, tmap)
 alg   = EPABC(data, model, λ=0.05, α=1e-9)
 
-trace = ep!(alg, 2, maxn=1e4, mina=100, target=100, fillup=true)
+trace = ep!(alg, 3, maxn=1e5, mina=100, target=100, fillup=true)
+
+trace = SmoothTree.pep_pass!(alg, maxn=1e4, mina=100, target=100, fillup=true)
 
 X, Y = traceback(trace)
-
-xs = filter(x->size(x[2], 2) > 1, collect(X))
-map(xs) do (k, x)
-    p1 = plot(x, title="clade $(bitstring(k)[end-7:end])")
-    p2 = plot(Y[k])
-    plot(p1, p2)
-end |> x-> plot(x..., size=(1200,500))
 
 pq = trace[end].q
 p = plot()
 for (k,v) in pq.cmap
-    v[1] == NaN && continue
+    isnan(v[1]) && continue
     m, V = SmoothTree.gaussian_nat2mom(v...)
-    plot!(Normal(m, √V))
+    plot!(LogNormal(m, √V), xlim=(0,10))
 end
 plot(p)
 
