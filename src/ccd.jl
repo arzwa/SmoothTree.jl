@@ -122,7 +122,7 @@ function addtree!(ccd::CCD, tree::Node, w=1)
             left = walk(n[1])
             rght = walk(n[2])
             clade = left + rght
-            x = left < rght ? left : rght
+            x = min(left, rght)
             _update!(cmap, smap, clade, x)
             cmap[clade] += w
             smap[clade][x] += w

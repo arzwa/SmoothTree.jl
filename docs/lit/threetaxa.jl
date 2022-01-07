@@ -93,14 +93,18 @@ pp = ls ./ sum(ls)
 pp = Dict(t=>p for (t,p) in zip(trees, pp))
 ppdf = postpdf(G, trees, m, prior)
 
-Sprior = NatBMP(CCD(trees, lmap=m, α=1.))
-smple  = ranking(randtree(MomBMP(Sprior), 10000))
-θprior = [SmoothTree.gaussian_mom2nat(log(1.), 5.)...]
-data  = CCD.(Y, lmap=m, α=0.)
-model = MSCModel(Sprior, θprior, m)
-alg   = EPABC(data, model, λ=0.1, α=1e-9)
-trace = ep!(alg, 10, maxn=1e5, mina=100, target=500);
-smple = SmoothTree.ranking(randtree(SmoothTree.MomBMP(trace[end].S), 10000))
+# EP
+Sprior = NatBMP(UInt16(7))
+θprior = SmoothTree.gaussian_mom2nat([log(1.), 5.])
+q      = BranchModel(UInt16, θprior )
+data   = CCD.(Y, lmap=m, α=0.)
+model  = MSCModel(Sprior, q, m)
+alg    = EPABC(data, model, λ=0.1, α=1e-9, maxsim=1e5)
+
+trace = SmoothTree.ep_serial!(alg)
+
+trace  = ep!(alg, 10, maxn=1e5, mina=100, target=500);
+smple  = SmoothTree.ranking(randtree(SmoothTree.MomBMP(trace[end].S), 10000))
 
 combine(xs::Vector{<:Dict}) = Dict(k=>[x[k] for x in xs] for k in keys(xs[1]))
 

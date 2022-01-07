@@ -9,6 +9,43 @@ using StatsBase, Distributions
     trees = SmoothTree.rootall!(trees)
     ccd = CCD(trees)
 
+    @testset "BranchModel algebra" begin
+        q1 = BranchModel(UInt16, [1., -1.])
+        q2 = BranchModel(UInt16, [2., -4.])
+        q3 = 0.1q1 + 2.1q2
+        m3 = MomBranchModel(q3)
+        @test all(BranchModel(m3).η0 .== q3.η0)
+    end
+
+    @testset "NatBMP algebra" begin 
+        S = nw"((B:Inf,C:Inf):0.5,A:Inf);"
+        m = SmoothTree.taxonmap(S)
+        M = SmoothTree.MSC(S, m)
+        Y = randtree(M, m, 100)
+        X = NatBMP(CCD(Y, α=1.))
+        # sparsesplits algebra
+        y = X.smap[0x0007]
+        z = mom2nat(nat2mom(0.2y + 0.8y))
+        @test z.η0 ≈ y.η0
+        @test all(values(z.splits) .≈ values(y.splits))
+        X = NatBMP(CCD(Y[1:2], α=1.))
+        y = X.smap[0x0007]
+        z = SmoothTree.SparseSplits(typeof(y.splits)(), 3, 0, 0., y.ref)
+        @test (y + z).η0 ≈ y.η0
+        @test (y - y).η0 ≈ z.η0
+    end
+
+    @testset "MSCModel" begin
+        S = nw"((B:Inf,C:Inf):0.5,A:Inf);"
+        m = SmoothTree.taxonmap(S)
+        M = SmoothTree.MSC(S, m)
+        Y = randtree(M, m, 100)
+        X = NatBMP(CCD(Y, α=1.))
+        q = BranchModel(UInt16, [1., -1.])
+        M1 = MSCModel(X, q, m)
+        M2 = M1 + M1*0.3
+    end
+
     @testset "Proper normalization?" begin
         for (k,v) in ccd.cmap
             SmoothTree.isleafclade(k) && continue

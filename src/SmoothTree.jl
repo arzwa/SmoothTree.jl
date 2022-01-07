@@ -9,10 +9,11 @@ export ranking, taxonmap
 
 include("utils.jl")
 include("ccd.jl")
-include("bmp.jl")
 include("msc.jl")
-include("nni.jl")
+include("sparsesplits.jl")
+include("bmp.jl")
 include("branchmodel.jl")
+include("mscmodel.jl")
 include("epabc.jl")
 
 end # module
