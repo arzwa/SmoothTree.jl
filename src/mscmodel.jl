@@ -48,6 +48,8 @@ function randtree(model::MSCSampler)
 end
 # NOTE: we are not yet dealing with the rooted case, where the
 # branches stemming from the root should have infinite length...
+randtree(model::MSCModel) = randtree(MSCSampler(model))
+randtree(model::MSCModel, n) = randtree(MSCSampler(model), n)
 
 """
     updated_model(trees, cavity, α)
@@ -58,9 +60,24 @@ posterior with prior `α` for the accepted trees, and updates the
 Gaussian distributions for the branch parameters.
 """
 function matchmoments(trees, cavity::MSCModel{T}, α) where T
-    m = taxonmap(trees[1], T)  # XXX sucks?
+    m = shitmap(trees[1], T)  # XXX sucks?
     S = NatBMP(CCD(trees, lmap=m, α=α))#, αroot=0.)) respect rooting?
     q = matchmoments(trees, cavity.q)
     return MSCModel(S, q, cavity.m)
 end
 
+shitmap(tree, T) = BiMap(Dict(T(id(n))=>name(n) for n in getleaves(tree)))
+# issue is that we are using the id field here (which is good here
+# internally, not in general), but `CCD` uses a taxonmap and the name
+# field (good in general)...
+   
+function prune(model::MSCModel, atol=1e-9)
+    S = prune(model.S, atol)
+    q = prune(model.q, atol)
+    return MSCModel(S, q, model.m)
+end
+
+function prune!(model::MSCModel, atol=1e-9)
+    prune!(model.S, atol)
+    prune!(model.q, atol)
+end

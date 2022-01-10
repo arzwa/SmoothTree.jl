@@ -36,61 +36,65 @@ SmoothTree.setdistance_internal!(S, θ)
 m = taxonmap(S, T)
 d = getcladeθ(S, m)
 M = SmoothTree.MSC(S, m)
-n = 100
-G = randtree(M, m, n)
+N = 100
+G = randtree(M, m, N)
 ranking(G) .|> last
 
 #Sprior = NatBMP(CCD(G, lmap=m, α=10.))
 #Sprior = NatBMP(CCD(G, lmap=m, α=1.))
 #Sprior = NatBMP(CCD(G, lmap=m, α=1e-4))
-#smple  = last.(ranking(randtree(MomBMP(Sprior), 10000)))
+#Sprior = NatBMP(CCD(unique(G), α=0.1))
+#smple  = ranking(randtree(MomBMP(Sprior), 10000))
 root = T(2^ntaxa - 1)
 Sprior = NatBMP(root)
 priormean = 1.
 priorvar  = 5.
-θprior = [SmoothTree.gaussian_mom2nat(log(priormean), priorvar)...]
+θprior = BranchModel(T, SmoothTree.gaussian_mom2nat([log(priormean), priorvar]))
 
 data  = CCD.(G, lmap=m, α=1/2^(ntaxa-1))
 model = MSCModel(Sprior, θprior, m)
-alg   = EPABC(data, model, λ=0.1, α=0.01) #1/2^(ntaxa-1))
+alg   = EPABC(data, model, λ=0.1, α=1/2^(ntaxa-1), prunetol=1e-9)
 
 #_ = SmoothTree.ep_iteration!(alg, 1, maxn=1e5, mina=10, target=100, noisy=true, adhoc=true)
 
 # EP
-trace = ep!(alg, 3, maxn=1e4, mina=100, target=100, fillup=true)
-
-# Analysis
-X, Y = traceback(trace)
-
-xs = filter(x->size(x[2], 2) > 1, collect(X))
-map(xs) do (k, x)
-    p1 = plot(x, title="clade $(bitstring(k)[end-7:end])")#, xscale=:log10)
-    p2 = plot(Y[k])
-    plot(p1, p2)
-end |> x-> plot(x..., size=(1200,500))
+#trace = pep!(alg, 1)
+trace = ep!(alg, 5)
 
 smple = ranking(randtree(alg.model.S, 10000))
-
 SmoothTree.topologize(S)
 SmoothTree.relabel(first(smple)[1], m)
+
+# Analysis
+X1, X2 = traceback(trace)
+
+#xs = filter(x->size(x[2], 2) > 1, collect(X1))
+#map(xs) do (k, x)
+#    p1 = plot(x, title="clade $(bitstring(k)[end-7:end])")#, xscale=:log10)
+#    p2 = plot(X2[k])
+#    plot(p1, p2)
+#end |> x-> plot(x..., size=(1200,500))
 
 # log scale
 mapS = first(smple)[1]
 clades = filter(n->!SmoothTree.isleafclade(n), id.(postwalk(mapS)))[1:end-1]
-p = map(clades) do g
-    lm, V = Y[g][end,:]
+pls = map(clades) do g
     plot(Normal(log(priormean), √priorvar), color=:lightgray,
-         fill=true, xlim=(-4.5,4.5), yticks=false, grid=false)
-    plot!(Normal(lm, √V), color=:black)
+         fill=true, fillalpha=0.8, xlim=(-4.5,4.5), yticks=false, grid=false)
+    for model in trace
+        lm, V = SmoothTree.gaussian_nat2mom(model.q[g])
+        plot!(Normal(lm, √V), color=:black)
+    end
     vline!([log(d[g])], color=:black, ls=:dot)
-end |> x->plot(x...) #,layout=(3,5), size=(600,300))
-#xlabel!(p.subplots[13], L"\theta")
+end 
+#xlabel!(pls[13], L"\theta")
+plot(pls...) #,layout=(3,5), size=(600,300))
 #plot(p, bottom_margin=1.5mm)
 #savefig("docs/img/17taxa-posterior.pdf")
 
 # posterior prediction
 pps = map(1:1000) do rep
-    S = SmoothTree.randsptree(trace[end])
+    S = randtree(alg.model)
     M = SmoothTree.MSC(S, Dict(id(n)=>[id(n)] for n in getleaves(S)))
     pps = proportionmap(randtree(M, m, length(G)))
 end
@@ -135,3 +139,5 @@ end
 plot(p)
 #savefig("17taxa-pps.pdf")
 
+
+plot(pls..., p)

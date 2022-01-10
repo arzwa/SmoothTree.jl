@@ -124,7 +124,7 @@ convenience (interpretability).
 """
 struct MomBranchModel{T,V}
     cmap ::Dict{T,Vector{V}}  # clade => natural parameter 
-    θ0   ::Vector{V}          # natural parameter for unrepresented clade
+    η0   ::Vector{V}          # natural parameter for unrepresented clade
 end
 
 function MomBranchModel(q::BranchModel)
@@ -134,5 +134,33 @@ end
 
 function BranchModel(q::MomBranchModel)
     m = Dict(γ=>gaussian_mom2nat(η) for (γ, η) in q.cmap)
-    BranchModel(m, gaussian_mom2nat(q.θ0))
+    BranchModel(m, gaussian_mom2nat(q.η0))
 end
+
+# pruning: note that we cannot just remove those clades not in the
+# associated BMP. When we prune a BMP, we will remove for instance
+# probability 1 clades with two leaves from the smap (since they need
+# not be represented explicitly), however, their clade in the branch
+# model should not be removed!
+#function prune(m::BranchModel, x::AbstractBMP)
+#    d = Dict(γ=>m[γ] for γ in keys(x.smap))
+#    BranchModel(d, m.η0)
+#end
+#
+#function prune!(m::BranchModel, x::AbstractBMP)
+#    for γ in setdiff(keys(m.cmap), keys(x.smap))
+#        delete!(m.cmap, γ)
+#    end
+#end
+
+function prune(m::BranchModel, atol)
+    d = Dict(γ=>v for (γ,v) in m.cmap if all(isapprox(v, m.η0, atol=atol)))
+    BranchModel(d, m.η0)
+end
+
+function prune!(m::BranchModel, atol)
+    for (γ, v) in m.cmap
+        all(isapprox(v, m.η0, atol=atol)) && delete!(m.cmap, γ)
+    end
+end
+

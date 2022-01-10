@@ -7,16 +7,23 @@ abstract type AbstractEPABC end
     sites::Vector{M}
     λ::Float64 = 0.1    # for damped update...
     α::Float64 = 1e-16  # Dirichlet-BMP parameter for 'moment matching'
-    minacc = 10
-    target = 100
+    minacc = 100
+    target = 500
     maxsim = 1e5 
     fillup = true
+    prunetol = 0.
 end
 
 function EPABC(data, prior::T; kwargs...) where T
     sites = Vector{T}(undef, length(data)+1)
     sites[end] = prior  # last entry is the prior
     EPABC(data=data, model=prior, sites=sites; kwargs...)
+end
+
+function prune!(alg)
+    alg.prunetol == 0. && return
+    map(site->prune!(site, alg.prunetol), alg.sites)
+    alg.model = reduce(+, alg.sites)
 end
 
 # get the cavity distribution
@@ -55,20 +62,62 @@ function ep_iteration(alg, i)
         accS = last.(accsims)
         full = matchmoments(accS, cavity, alg.α)
     end
-    return nacc, n, full, cavity
+    return nacc, n, full, cavity, accsims
 end
 
+"""
+    ep!(alg, n; kwargs...)
+
+Do `n` serial EP passes.
+"""
+ep!(alg, n=1; kwargs...) = mapreduce(i->ep_serial!(alg; kwargs...), vcat, 1:n)
+
+"""
+    pep!(alg, n)
+
+Do `n` (embarrassingly) parallel EP passes.
+"""
+pep!(alg, n=1; kwargs...) = mapreduce(i->ep_parallel!(alg; kwargs...), vcat, 1:n)
+
+"""
+    ep_serial!(alg; rnd=true)
+
+Serial EP pass. When `rnd=true` the pass goes over the data in a
+random order. 
+"""
 function ep_serial!(alg; rnd=true) 
     rnge = rnd ? shuffle(1:length(alg.data)) : 1:length(alg.data)
     iter = ProgressBar(rnge)
     nacc = n = 0
     trace = map(iter) do i
         set_description(iter, string(@sprintf("%4d%4d/%6d", i, nacc, n)))
-        nacc, n, full, cavity = ep_iteration(alg, i)
+        nacc, n, full, cavity, _ = ep_iteration(alg, i)
         update!(alg, full, cavity, i) 
     end 
+    prune!(alg)
+    return alg.model
 end
 
+"""
+    ep_parallel!(alg)
+
+Embarrassingly parallel EP pass.
+"""
+function ep_parallel!(alg)
+    N = length(alg.data)
+    iter = ProgressBar(1:N)
+    Threads.@threads for i in iter
+        nacc, n, full, cavity, _ = ep_iteration(alg, i)
+        alg.sites[i] = full - cavity
+        set_description(iter, string(@sprintf("%4d%4d/%6d", i, nacc, n)))
+    end
+    alg.sites[1:N] .= map(x->alg.λ*x, alg.sites[1:N])
+    alg.model = reduce(+, alg.sites)
+    # XXX deal with damped updates... 
+    prune!(alg)
+    return alg.model
+end
+    
 # not using the cavity...
 function update!(alg, full, cavity, i)
     @unpack λ = alg
@@ -77,6 +126,30 @@ function update!(alg, full, cavity, i)
         alg.sites[i] + siteup : siteup
     alg.model = alg.model + siteup
 end
+
+"""
+    traceback
+"""
+function traceback(trace)
+    clades = keys(trace[end].S.smap)
+    splits = Dict(γ=>collect(keys(trace[end].S.smap[γ].splits)) for γ in clades)
+    traces = Dict(γ=>Vector{Float64}[] for γ in clades)
+    θtrace = Dict(γ=>Vector{Float64}[] for γ in clades)
+    for i=length(trace):-1:1
+        bmp = SmoothTree.MomBMP(trace[i].S)
+        q = trace[i].q
+        for γ in clades
+            x = map(δ->haskey(bmp, γ) ? bmp[γ][δ] : NaN, splits[γ])
+            y = gaussian_nat2mom(q[γ])
+            push!(traces[γ], x)
+            push!(θtrace[γ], y)
+        end
+    end
+    c = Dict(γ=>permutedims(hcat(reverse(xs)...)) for (γ, xs) in traces)
+    θ = Dict(γ=>permutedims(hcat(reverse(xs)...)) for (γ, xs) in θtrace)
+    return c, θ
+end
+
 
 #"""
 #    ep_iteration!(alg, i; kwargs...)

@@ -99,19 +99,17 @@ Sprior = NatBMP(UInt16(7))
 q      = BranchModel(UInt16, θprior )
 data   = CCD.(Y, lmap=m, α=0.)
 model  = MSCModel(Sprior, q, m)
-alg    = EPABC(data, model, λ=0.1, α=1e-9, maxsim=1e5)
+alg    = EPABC(data, model, λ=0.1, α=1e-9, maxsim=1e5, target=500, minacc=100)
 
-trace = SmoothTree.ep_serial!(alg)
-
-trace  = ep!(alg, 10, maxn=1e5, mina=100, target=500);
-smple  = SmoothTree.ranking(randtree(SmoothTree.MomBMP(trace[end].S), 10000))
+trace  = ep!(alg, 10);
+smple  = ranking(randtree(MomBMP(trace[end].S), 10000))
 
 combine(xs::Vector{<:Dict}) = Dict(k=>[x[k] for x in xs] for k in keys(xs[1]))
 
 A, B = traceback(trace)
-S = SmoothTree.randsptree(trace[end])
+S = SmoothTree.randtree(trace[end])
 M = SmoothTree.MSC(S, Dict(id(n)=>[id(n)] for n in getleaves(S)))
-pps = combine(map(_->proportionmap(randtree(M, m, n)), 1:1000))
+pps = combine(map(_->proportionmap(randtree(M, m, N)), 1:1000))
 obs = proportionmap(Y)
 
 p1 = plot(B[0x0003], label=[L"\log \mu" L"\sigma^2"],

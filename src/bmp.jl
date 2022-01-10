@@ -132,11 +132,33 @@ splits with split probabilities indistinguishable from the probability
 of an unrepresented split to the latter (thereby removing the split
 from the set of explicitly represented splits).
 """
-function prune(x::M; atol=1e-9) where {T,V,M<:AbstractBMP{T,V}}
+function prune(x::M, atol) where {T,V,M<:AbstractBMP{T,V}}
     newd = Dict{T,SparseSplits{T,V}}()
+    clades = Set(x.root)
+    # first we prune all splits with negligible probability
     for (γ, x) in x.smap
         newd[γ] = prune(x, atol)
+        union!(clades, keys(newd[γ].splits))
+    end
+    # then we prune clades which feature explicitly in none of the
+    # split distributions
+    toprune = setdiff(keys(newd), clades)
+    for γ in toprune
+        delete!(newd, γ)
     end
     return M(newd, x.root)
 end
+
+function prune!(x::M, atol) where {T,V,M<:AbstractBMP{T,V}}
+    clades = Set(x.root)
+    for (γ, x) in x.smap
+        prune!(x, atol)
+        union!(clades, keys(x.splits))
+    end
+    toprune = setdiff(keys(x.smap), clades)
+    for γ in toprune
+        delete!(x.smap, γ)
+    end
+end
+
 

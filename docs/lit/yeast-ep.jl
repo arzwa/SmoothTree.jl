@@ -9,19 +9,20 @@ tmap = SmoothTree.taxonmap(trees[1])
 
 root = UInt16(sum(keys(tmap)))
 Sprior = NatBMP(root, tmap["Calb"])
-#Sprior = NatBMP(CCD(trees, lmap=tmap, α=5.))
 smple  = ranking(randtree(MomBMP(Sprior), 10000))
-θprior = [SmoothTree.gaussian_mom2nat(log(1.), √5)...]
+θprior = BranchModel(UInt16, SmoothTree.gaussian_mom2nat([log(1.), √5]))
 
 # we can compare using ML gene trees against acknowledging uncertainty
 data  = CCD.(data_, lmap=tmap, α=.01)
 #data  = CCD.(trees, lmap=tmap, α=.0)
 model = MSCModel(Sprior, θprior, tmap)
-alg   = EPABC(data, model, λ=0.05, α=1e-9)
+alg   = EPABC(data, model, λ=0.1, α=1e-2, target=100, minacc=10)
 
-trace = ep!(alg, 3, maxn=1e5, mina=100, target=100, fillup=true)
+trace = SmoothTree.ep_serial!(alg)
 
-trace = SmoothTree.pep_pass!(alg, maxn=1e4, mina=100, target=100, fillup=true)
+trace = SmoothTree.ep_parallel!(alg)
+
+randtree(alg.model.S, 10000) |> ranking
 
 X, Y = traceback(trace)
 

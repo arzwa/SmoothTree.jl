@@ -101,11 +101,17 @@ end
 Prune out splits which are barely supported (have η ≈ η0, with
 absolute tolerance `atol`)
 """
-function prune(x::SparseSplits{T,V}, atol=1e-9) where {T,V}
+function prune(x::SparseSplits{T,V}, atol) where {T,V}
     d = Dict{T,V}()
     for (k,v) in x.splits
         !(isapprox(v, x.η0, atol=atol)) && (d[k] = v)
     end 
     # should we adjust η0?
     SparseSplits(d, x.n, length(d), x.η0, x.ref) 
+end
+
+function prune!(x::SparseSplits, atol)
+    for (k,v) in x.splits
+        isapprox(v, x.η0, atol=atol) && delete!(x.splits, k)
+    end 
 end

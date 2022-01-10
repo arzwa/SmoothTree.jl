@@ -7,6 +7,16 @@ default(gridstyle=:dot, legend=false, framestyle=:box,
         title_loc=:left, titlefont=7)
 
 # Simulation and numerical posterior for the four-taxon case
+# this calls 'hybrid-coal' by Zha & Degnan
+function hybcoal(S)
+    fname, io = mktemp()
+    close(io)
+    cmd = `/home/arzwa/bin/hybrid-coal -sp $(nwstr(S)) -o $fname`
+    run(pipeline(cmd, stderr="devnull"))
+    xs = map(split, readlines(fname * ".prob"))
+    run(`rm $fname $fname.prob`)
+    Dict(readnw(string(x[1]))=>parse(Float64, x[2]) for x in xs)
+end
 
 # Note that the likelihood p(X|θ,S) is a 15-cell multinomial
 # likelihood. When we are dealing with a single allele per species, we
@@ -34,20 +44,6 @@ sim = proportionmap(randtree(M, m, 10000))
 
 # all possible species trees
 allS = collect(keys(truedist))
-
-# Now to compute the posterior by quadrature, we need a function for
-# the likelihood. I guess we'll have to take a look in Degnan &
-# Salter...
-
-# this calls 'hybrid-coal' by Zha & Degnan
-function hybcoal(S)
-    fname, io = mktemp()
-    cmd = `/home/arzwa/bin/hybrid-coal -sp $(nwstr(S)) -o $fname`
-    run(pipeline(cmd, stderr="devnull"))
-    xs = map(split, readlines(fname * ".prob"))
-    run(`rm $fname $fname.prob`)
-    Dict(readnw(string(x[1]))=>parse(Float64, x[2]) for x in xs)
-end
 
 function marginal_lhood(X, S, prior, rtol=1e-2)
     function f(θ)
@@ -114,12 +110,12 @@ vline!([θ[2]], color=:black, ls=:dot)
 root = UInt16(15)
 Sprior = NatBMP(root)
 smple  = ranking(randtree(MomBMP(Sprior), 10000))
-θprior = [SmoothTree.gaussian_mom2nat(mean(prior), std(prior)^2)...]
+θprior = BranchModel(UInt16, SmoothTree.gaussian_mom2nat([mean(prior), std(prior)^2]))
 data  = CCD.(Y, lmap=m, α=0.)
 model = MSCModel(Sprior, θprior, m)
-alg   = EPABC(data, model, λ=0.1, α=1e-9)
-trace = ep!(alg, 10, maxn=1e5, mina=100, target=500);
-smple = SmoothTree.ranking(randtree(SmoothTree.MomBMP(trace[end].S), 10000))
+alg   = EPABC(data, model, λ=0.1, α=1e-9, target=500, minacc=100, prunetol=1e-9)
+trace = ep!(alg, 10);
+smple = ranking(randtree(MomBMP(trace[end].S), 10000))
 X1, X2 = traceback(trace)
 
 xs = filter(x->size(x[2], 2) > 1, collect(X1))
@@ -176,5 +172,6 @@ plot!(d2, color=:black, label="")
 
 plot(pl1, pl2, size=(600,250), bottom_margin=2.7mm, left_margin=2mm,
      dpi=300, layout=grid(1,2,widths=[0.4,0.6]))
+
 savefig("docs/img/fourtaxon.pdf")
-savefig("docs/img/fourtaxon.pdf")
+savefig("docs/img/fourtaxon.png")
