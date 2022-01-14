@@ -107,23 +107,6 @@ function randsplit(m::MomBMP, γ)
     haskey(m, γ) && !ischerry(γ) ? randsplit(m[γ], γ) : randsplit(γ)
 end
 
-# XXX for moment parameter!
-function randsplit(x::SparseSplits, γ)
-    splitps = collect(x.splits)
-    weights = last.(splitps)
-    splits  = first.(splitps)
-    pr = weights .- x.η0  
-    # pr is the P mass of represented splits after taking out uniform
-    # note that we simulate by splitting the categorical distribution
-    # in a uniform and non-uniform component with restricted support
-    if rand() < sum(pr)
-        i = sample(1:length(pr), Weights(pr))
-        return splits[i]
-    else 
-        return randsplit(γ)
-    end
-end
-
 """
     prune
 

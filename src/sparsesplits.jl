@@ -115,3 +115,28 @@ function prune!(x::SparseSplits, atol)
         isapprox(v, x.η0, atol=atol) && delete!(x.splits, k)
     end 
 end
+
+# XXX for moment parameter!
+"""
+    randsplit(x::SparseSplits, γ)
+
+Get a random split distributed according to a sparse/uniform
+distribution over splits (all unrepresented splits are equally
+probable).
+"""
+function randsplit(x::SparseSplits, γ)
+    splitps = collect(x.splits)
+    weights = last.(splitps)
+    splits  = first.(splitps)
+    pr = weights .- x.η0  
+    # pr is the P mass of represented splits after taking out uniform
+    # note that we simulate by splitting the categorical distribution
+    # in a uniform and non-uniform component with restricted support
+    if rand() < sum(pr)
+        i = sample(1:length(pr), Weights(pr))
+        return splits[i]
+    else 
+        return randsplit(γ)
+    end
+end
+

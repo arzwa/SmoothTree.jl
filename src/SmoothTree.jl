@@ -1,7 +1,7 @@
 module SmoothTree
 
 using NewickTree, StatsBase, Parameters, Random, StatsFuns, Distributions
-using Printf, ProgressBars
+using Printf, ProgressBars, SpecialFunctions
 import Distributions: logpdf
 export CCD, MSC, randtree, randsplits, setdistance!, setdistance_internal!
 export NatBMP, MomBMP, MSCModel, BranchModel, traceback, ep!, pep!, EPABC
@@ -11,6 +11,7 @@ include("utils.jl")
 include("ccd.jl")
 include("msc.jl")
 include("sparsesplits.jl")
+include("betasparsesplits.jl")
 include("bmp.jl")
 include("branchmodel.jl")
 include("mscmodel.jl")
