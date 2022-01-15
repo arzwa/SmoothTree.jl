@@ -18,6 +18,8 @@
 # root split is certain, despite α>1 (this sounds a bit confusing).
 
 # XXX reconsider the taxon map stuff
+# We might do away with it altogether, requiring appropriately labeled
+# trees as input?
 
 # aliases
 const DefaultNode{T} = Node{T,NewickData{Float64,String}}

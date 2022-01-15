@@ -16,7 +16,7 @@
 """
 struct BetaSparseSplits{T,V}
     splits::Dict{T,V}  # explicitly represented splits
-    γ  ::T
+    γ  ::T             # parent clade
     n  ::Vector{Int}   # total number of splits of each size
     k  ::Vector{Int}   # number of unrepresented splits of each size
     η0 ::Vector{V}     # parameter for unrepresented splits of size [1..|γ|-1]
@@ -111,7 +111,7 @@ function randsplitofsize(γ::T, k) where T
     # o = [a,b] means we obtain a split by taking/removing the ath and
     # bth leaf from γ. Note that this does not mean the ath and bth
     # index in the binary expansion, but rather the ath and bth one in
-    # the brinary expansion. The below ugliish while loop constructs
+    # the binary expansion. The below ugliish while loop constructs
     # the requirred binary expansion of the split from `o`.
     j = pop!(o)
     i = 1  # index over g
@@ -133,16 +133,28 @@ function randsplitofsize(γ::T, k) where T
 end
 
 # Define linear operations
-function Base.:+(x::BetaSparseSplits, y::BetaSparseSplits)
+function Base.:+(x::BetaSparseSplits{T,V}, y::BetaSparseSplits) where {T,V}
+    @assert x.γ == y.γ
     splits = union(keys(x.splits), keys(y.splits))
-    d = Dict(δ=>x[δ] .+ y[δ] for δ in splits)
-    BetaSparseSplits(d, x.γ, x.n, length(d), x.η0 + y.η0, x.ref)
+    k = copy(x.n)
+    d = Dict{T,V}()
+    for δ in splits
+        d[δ] = x[δ] + y[δ]
+        k[splitsize(x.γ, δ)] -= 1
+    end
+    BetaSparseSplits(d, x.γ, x.n, k, x.η0 + y.η0, x.ref)
 end
 
-function Base.:-(x::BetaSparseSplits, y::BetaSparseSplits)
+function Base.:-(x::BetaSparseSplits{T,V}, y::BetaSparseSplits) where {T,V}
+    @assert x.γ == y.γ
     splits = union(keys(x.splits), keys(y.splits))
-    d = Dict(δ=>x[δ] .- y[δ] for δ in splits)
-    BetaSparseSplits(d, x.γ, x.n, length(d), x.η0 - y.η0, x.ref)
+    k = copy(x.n)
+    d = Dict{T,V}()
+    for δ in splits
+        d[δ] = x[δ] - y[δ]
+        k[splitsize(x.γ, δ)] -= 1
+    end
+    BetaSparseSplits(d, x.γ, x.n, k, x.η0 - y.η0, x.ref)
 end
 
 Base.:*(a, x::BetaSparseSplits) = x * a
