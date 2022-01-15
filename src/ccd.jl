@@ -1,13 +1,6 @@
 # Arthur Zwaenepoel 2021
 # Currently only thought about rooted trees
-#
-# Depending on our application, different representations are
-# desirable. To query probabilities for arbitrary tree topologies,
-# we'd need a lot of dictionary-like lookup utilities, while in ALE we
-# only need the clades ordered and for each clade easy access to its
-# possible splits, so that vector based representations are probably
-# optimal.
-#
+
 # Rooted/unrooted? If all input trees are (arbitrarily) rooted at some
 # taxon, when α=0, we'll have that all trees from the CCD are rooted
 # in the same arbitrary way, and they can be interpreted as draws from
@@ -20,6 +13,9 @@
 # XXX reconsider the taxon map stuff
 # We might do away with it altogether, requiring appropriately labeled
 # trees as input?
+#
+# XXX refactor to keep CCD as in Larget, separating it from the prior
+# model, i.e. CCD is just a data structure for observed splits
 
 # aliases
 const DefaultNode{T} = Node{T,NewickData{Float64,String}}
@@ -31,12 +27,10 @@ const Splits{T} = Vector{Tuple{T,T}}
 A conditional clade distribution object.
 """
 mutable struct CCD{T,V}
-    lmap  ::BiMap{T,String}
-    cmap  ::Dict{T,V}          # clade counts
-    smap  ::Dict{T,Dict{T,V}}  # split counts
-    root  ::T
-    αroot ::Float64
-    α     ::Float64
+    lmap::BiMap{T,String}
+    cmap::Dict{T,V}          # clade counts
+    smap::Dict{T,Dict{T,V}}  # split counts
+    root::T
 end
 
 nl(X::CCD) = length(X.lmap)
@@ -65,9 +59,6 @@ cladesize(clade) = count_ones(clade)
 # get the root clade for n leaves
 rootclade(n, T=UInt16) = T(2^n - 1) 
 
-# obtain the clade leaf names from its Int representation
-#getclade(ccd::CCD, clade) = ccd.leaves[Bool.(digits(clade, base=2, pad=nl(ccd)))]
-
 # conditional clade probability
 ccp(ccd::CCD, γ, δ) = ccd.smap[γ][δ] / ccd.cmap[γ]
 logccp(ccd, γ, δ) = log(ccd.smap[γ][δ]) - log(ccd.cmap[γ])
@@ -81,34 +72,23 @@ CCD(trees::AbstractDict; kwargs...) = CCD(collect(trees); kwargs...)
 # For a single tree
 CCD(tree::Node; kwargs...) = CCD([tree]; kwargs...)
 
-# get a uniform BMP distribution on a certain leaf set
-CCD(lmap::BiMap; α=1., αroot=α) = initccd(lmap, α, αroot)
-CCD(leaves::Vector{String}; kwargs...) = CCD(taxonmap(leaves); kwargs...)
-
 # from a vector of (pairs of) trees
-function CCD(trees; lmap=taxonmap(trees[1], UInt16), α=0., αroot=α)
-    ccd = initccd(lmap, α, αroot)
+function CCD(trees; lmap=taxonmap(trees[1], UInt16))
+    ccd = initccd(lmap)
     for tree in trees
         ccd = addtree!(ccd, tree)
     end
     return ccd
 end
 
-function initccd(lmap::BiMap{T,V}, α=0., αroot=α) where {T,V}
+# initialize a ccd
+function initccd(lmap::BiMap{T,V}) where {T,V}
     cmap = Dict{T,Int64}(γ=>0 for (γ,_) in lmap)
     smap = Dict{T,Dict{T,Int64}}()
     root = T(sum(keys(lmap)))
     cmap[root] = 0  
     smap[root] = Dict{T,Int64}()
-    # Note that the rootclade must always be present for randtree
-    # to work, also if there are no observations added to the CCD 
-    ccd = CCD(lmap, cmap, smap, root, αroot, α)
-end
-
-# assign leaf clade numbers (base 2)
-function leafclades(leaves, T=UInt16)
-    d = Dict{String,T}(k=>one(T) << T(i-1) for (i,k) in enumerate(leaves))
-    return d
+    ccd = CCD(lmap, cmap, smap, root)
 end
 
 # add a tree/number of identical trees to the CCD
@@ -152,10 +132,6 @@ inccd(ccd, γ) = haskey(ccd.cmap, γ) && !(ccd.cmap[γ] == 0)
 # the number of possible splits of a set of size n
 _ns(n) = 2^(n-1) - 1
 
-# get the relevant alpha value, this could deal with α depending on
-# clade size?
-getα(ccd::CCD, clade) = clade == ccd.root ? ccd.αroot : ccd.α
-
 # get the modal tree? this uses a greedy algorithm, not sure if
 # guaranteed to give the mode?
 function modetree(ccd::CCD{T}) where T
@@ -176,9 +152,7 @@ end
 
 # draw a tree from the ccd, simulates a tree as a set of splits
 function randsplits(ccd::CCD{T}) where T
-    return ccd.α == 0. ? 
-        _randwalk1(Tuple{T,T}[], ccd.root, ccd) : 
-        _randwalk2(Tuple{T,T}[], ccd.root, ccd)
+    _randwalk1(Tuple{T,T}[], ccd.root, ccd)
 end
 
 # do n `randsplits` simulations
@@ -198,62 +172,63 @@ function _randwalk1(splits, clade, ccd)
 end
 
 # α > 0. case
-function _randwalk2(splits, clade, ccd)
-    isleafclade(clade) && return splits 
-    left = if !inccd(ccd, clade)
-        # uniform random split XXX: this is a bit weird, since
-        # unobserved clades can lead to splits which contain observed
-        # clade, but we don't account for that...
-        splt = randsplit(clade)
-        left = min(splt, clade - splt)
-    else
-        α = getα(ccd, clade)
-        csplits = collect(ccd.smap[clade])
-        observed_splits = first.(csplits)
-        weights = last.(csplits)
-        k = length(csplits)   # number of splits
-        n = cladesize(clade)  
-        N = ccd.cmap[clade]
-        # probability of an observed split
-        denom = log(α * _ns(n) + N)
-        #lpobs = log(k*ccd.α + N) - denom
-        lpobs = log(N) - denom
-        if log(rand()) < lpobs 
-            # observed split
-            splt = sample(1:k, Weights(weights))
-            left = observed_splits[splt]
-        else  
-            # unobserved split
-            left = randsplit(clade)
-            #while left ∈ observed_splits  # XXX rejection sampler
-            #    left = randsplit(clade)
-            #end
-            left
-        end
-    end
-    rght = clade - left
-    push!(splits, (clade, left))
-    splits = _randwalk2(splits, left, ccd)
-    splits = _randwalk2(splits, rght, ccd)
-    return splits
-end
+# XXX convert to MBM instead!
+#function _randwalk2(splits, clade, ccd)
+#    isleafclade(clade) && return splits 
+#    left = if !inccd(ccd, clade)
+#        # uniform random split XXX: this is a bit weird, since
+#        # unobserved clades can lead to splits which contain observed
+#        # clade, but we don't account for that...
+#        splt = randsplit(clade)
+#        left = min(splt, clade - splt)
+#    else
+#        α = getα(ccd, clade)
+#        csplits = collect(ccd.smap[clade])
+#        observed_splits = first.(csplits)
+#        weights = last.(csplits)
+#        k = length(csplits)   # number of splits
+#        n = cladesize(clade)  
+#        N = ccd.cmap[clade]
+#        # probability of an observed split
+#        denom = log(α * _ns(n) + N)
+#        #lpobs = log(k*ccd.α + N) - denom
+#        lpobs = log(N) - denom
+#        if log(rand()) < lpobs 
+#            # observed split
+#            splt = sample(1:k, Weights(weights))
+#            left = observed_splits[splt]
+#        else  
+#            # unobserved split
+#            left = randsplit(clade)
+#            #while left ∈ observed_splits  # XXX rejection sampler
+#            #    left = randsplit(clade)
+#            #end
+#            left
+#        end
+#    end
+#    rght = clade - left
+#    push!(splits, (clade, left))
+#    splits = _randwalk2(splits, left, ccd)
+#    splits = _randwalk2(splits, rght, ccd)
+#    return splits
+#end
 
 # could be more efficient I guess, also requires the number 2^(n-1),
 # which becomes prohibitive for large n
-function randsplit(γ::T) where T
-    g = digits(γ, base=2)
-    n = sum(g)
-    x = rand(1:_ns(n))
-    d = digits(x, base=2)
-    tips = [(i-1) for (i,gi) in enumerate(g) if gi == 1]
-    subclade = 0
-    for i=1:length(d)
-        subclade += d[i] * 2^tips[i]
-    end
-    splt = T(subclade)
-    left = min(splt, γ - splt)
-    return left
-end
+#function randsplit(γ::T) where T
+#    g = digits(γ, base=2)
+#    n = sum(g)
+#    x = rand(1:_ns(n))
+#    d = digits(x, base=2)
+#    tips = [(i-1) for (i,gi) in enumerate(g) if gi == 1]
+#    subclade = 0
+#    for i=1:length(d)
+#        subclade += d[i] * 2^tips[i]
+#    end
+#    splt = T(subclade)
+#    left = min(splt, γ - splt)
+#    return left
+#end
 
 # obtain a gene tree from a split set
 function treefromsplits(splits::Splits{T}, names) where T
@@ -289,7 +264,8 @@ randtree(model, n) = map(_->randtree(model), 1:n)
 function logpdf(ccd::CCD, splits::Vector{T}) where T<:Tuple
     ℓ = 0.
     for (γ, δ) in splits
-        ℓ += _splitp(ccd, γ, δ)
+        #ℓ += _splitp(ccd, γ, δ)
+        ℓ += logccp(ccd, γ, δ)
     end
     return ℓ
 end
@@ -297,14 +273,15 @@ end
 # The contribution of a single split to the tree probability
 # currently assumes the uniform prior over splits.
 # XXX: this should actually replace `logccp`
-function _splitp(ccd, γ, δ)
-    n = cladesize(γ)
-    α = getα(ccd, γ)
-    Z = α * _ns(n)
-    Z += inccd(ccd, γ) ? ccd.cmap[γ] : 0
-    nδ = inccd(ccd, γ, δ) ? ccd.smap[γ][δ] : 0
-    log(α + nδ) - log(Z)
-end
+# XXX: convert to MBM for the probability under a posterior
+#function _splitp(ccd, γ, δ)
+#    n = cladesize(γ)
+#    α = getα(ccd, γ)
+#    Z = α * _ns(n)
+#    Z += inccd(ccd, γ) ? ccd.cmap[γ] : 0
+#    nδ = inccd(ccd, γ, δ) ? ccd.smap[γ][δ] : 0
+#    log(α + nδ) - log(Z)
+#end
 
 # compute the probability mass of a single tree under the CCD
 function logpdf(ccd::CCD, tree::Node)
@@ -318,7 +295,8 @@ function _lwalk(n::Node, ccd, ℓ)
     ℓ, rght = _lwalk(n[2], ccd, ℓ)
     δ = left < rght ? left : rght
     γ = left + rght
-    ℓ += _splitp(ccd, γ, δ) 
+    #ℓ += _splitp(ccd, γ, δ) 
+    ℓ += logccp(ccd, γ, δ) 
     return ℓ, γ
 end
 
@@ -336,47 +314,3 @@ function logpdf(ccd::CCD, trees::Dict)
     return l
 end
 
-getcladesbits(tree, T=UInt16) = getcladesbits(tree, taxonmap(tree))
-
-# get clades as bitstrings
-function getcladesbits(tree, m::BiMap{T,V}) where {T,V}
-    clades = T[]
-    function walk(n)
-        clade = isleaf(n) ? m[name(n)] : walk(n[1]) + walk(n[2])
-        push!(clades, clade)
-        return clade
-    end
-    walk(tree)
-    return clades
-end
-
-# XXX the above does not work as a hashing function! isomorphic trees
-# (same topology, different labels) will have the same clade set!
-# This does lead to the following handy function
-function isisomorphic(t1, t2, tmap)
-    h1 = hash(sort(getcladesbits(t1, tmap)))
-    h2 = hash(sort(getcladesbits(t2, tmap)))
-    h1 == h2
-end
-
-# allows to count topologies using `countmap`
-# note though that this is not really worthwhile, reading in the ccd
-# tree by tree from the sample appears to be more efficient
-Base.hash(tree::Node) = hash(sort(getclades(tree)))
-Base.isequal(t1::Node, t2::Node) = hash(t1) == hash(t2)
-
-function getclades(tree)
-    i = -1  # leaf counter
-    clades = Vector{String}[]
-    function walk(n)
-        clade = if isleaf(n)
-            [name(n)]
-        else
-            sort(vcat(walk(n[1]), walk(n[2])))
-        end
-        push!(clades, clade)
-        return clade
-    end
-    walk(tree)
-    return clades
-end

@@ -6,7 +6,7 @@ abstract type AbstractEPABC end
     model::M
     sites::Vector{M}
     λ::Float64 = 0.1    # for damped update...
-    α::Float64 = 1e-16  # Dirichlet-BMP parameter for 'moment matching'
+    α::Float64 = 1e-16  # Dirichlet-MBM parameter for 'moment matching'
     minacc = 100
     target = 500
     maxsim = 1e5 
@@ -136,7 +136,7 @@ function traceback(trace)
     traces = Dict(γ=>Vector{Float64}[] for γ in clades)
     θtrace = Dict(γ=>Vector{Float64}[] for γ in clades)
     for i=length(trace):-1:1
-        bmp = SmoothTree.MomBMP(trace[i].S)
+        bmp = SmoothTree.MomMBM(trace[i].S)
         q = trace[i].q
         for γ in clades
             x = map(δ->haskey(bmp, γ) ? bmp[γ][δ] : NaN, splits[γ])
@@ -262,7 +262,7 @@ end
 #    traces = Dict(γ=>Vector{Float64}[] for γ in clades)
 #    θtrace = Dict(γ=>Vector{Float64}[] for γ in clades)
 #    for i=length(trace):-1:1
-#        bmp = SmoothTree.MomBMP(trace[i].S)
+#        bmp = SmoothTree.MomMBM(trace[i].S)
 #        q = trace[i].q
 #        for γ in clades
 #            x = map(δ->haskey(bmp, γ) ? bmp[γ][δ] : NaN, splits[γ])

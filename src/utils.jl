@@ -165,6 +165,51 @@ function readtrees(path)
     end
 end
 
+# Tree comparison etc.
+getcladesbits(tree, T=UInt16) = getcladesbits(tree, taxonmap(tree))
+
+# get clades as bitstrings
+function getcladesbits(tree, m::BiMap{T,V}) where {T,V}
+    clades = T[]
+    function walk(n)
+        clade = isleaf(n) ? m[name(n)] : walk(n[1]) + walk(n[2])
+        push!(clades, clade)
+        return clade
+    end
+    walk(tree)
+    return clades
+end
+
+# XXX the above does not work as a hashing function! isomorphic trees
+# (same topology, different labels) will have the same clade set!
+# This does lead to the following handy function
+function isisomorphic(t1, t2, tmap)
+    h1 = hash(sort(getcladesbits(t1, tmap)))
+    h2 = hash(sort(getcladesbits(t2, tmap)))
+    h1 == h2
+end
+
+# allows to count topologies using `countmap`
+# note though that this is not really worthwhile, reading in the ccd
+# tree by tree from the sample appears to be more efficient
+Base.hash(tree::Node) = hash(sort(getclades(tree)))
+Base.isequal(t1::Node, t2::Node) = hash(t1) == hash(t2)
+
+function getclades(tree)
+    i = -1  # leaf counter
+    clades = Vector{String}[]
+    function walk(n)
+        clade = if isleaf(n)
+            [name(n)]
+        else
+            sort(vcat(walk(n[1]), walk(n[2])))
+        end
+        push!(clades, clade)
+        return clade
+    end
+    walk(tree)
+    return clades
+end
 
 
 
