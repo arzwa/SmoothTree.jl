@@ -12,10 +12,22 @@ function betasplitp(n, β)
     return p
 end
 
+function _betasplitp(n, β)
+    p = map(i->(2i==n ? 0.5 : 1.) * f(β, n, i), 1:n÷2)
+    p ./= sum(p)
+    return p
+end
+
 function uniformsplit(n)
     N = 2^(n-1) - 1
     p = 1/N
     map(i->binomial(n,i)*p/2, 1:n-1)
+end
+
+function _uniformsplit(n)
+    N = 2^(n-1) - 1
+    p = 1/N
+    map(i->(2i==n ? 0.5 : 1.)*binomial(n,i)*p, 1:n÷2)
 end
 
 default(gridstyle=:dot, framestyle=:box)

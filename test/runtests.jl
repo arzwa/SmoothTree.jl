@@ -9,6 +9,44 @@ using StatsBase, Distributions
     trees = SmoothTree.rootall!(trees)
     ccd = CCD(trees)
 
+    @testset "Beta-splitting SparseSplits" begin
+        γ = UInt8(15)
+        d = Dict{UInt8,Int}()
+        # β = -3/2 -> PDA model (uniform onlabeled topologies)
+        b = SmoothTree.BetaSparseSplits(γ, d, -1.5, 1.)
+        m = SmoothTree.nat2mom(b)
+        ps = m.η0 .* m.k
+        @test sum(ps) == 1
+        @test ps[1] / 12 ≈ ps[2] / 3 ≈ 1/15 
+        # there are 15 topologies on 4 leaves, three of which are
+        # balanced. with β=-1.5 we should get all topologies equally
+        # likely. Each balanced split uniquely determines a topology,
+        # so we should get p(balanced split) = 1/15
+        # conditional on the first split being balanced, we have three
+        # possible topologies, whereas conditional on the first split
+        # being unbalanced we have 12. 
+        # β = 0. -> Yule model (coalescent, random joins)
+        b = SmoothTree.BetaSparseSplits(γ, d, 0., 1.)
+        m = SmoothTree.nat2mom(b)
+        ps = m.η0 .* m.k
+        @test sum(ps) == 1
+        @test ps[1] ≈ 2/3 && ps[2] ≈ 1/3
+        # under the coalescent, the first coalescence leads to a state
+        # with one cherry and two leaves, the next coalescence is in
+        # 2/3 cases joining the cherry with one of the leaves leading
+        # to an unbalanced topology, in 1/3 cases joins the two leaves
+        # to a second cherry, giving a balanced topology.
+        d = Dict{UInt8,Int}(5=>2, 1=>1, 7=>4)
+        b = SmoothTree.BetaSparseSplits(γ, d, 0., 1.)
+        m = SmoothTree.nat2mom(b)
+        p = sum(m.η0 .* m.k) + sum(values(m.splits))
+        pr = sum(values(m.splits))
+        @test p ≈ 1.
+        b = SmoothTree.BetaSparseSplits(γ, d, 0., 10.)
+        m = SmoothTree.nat2mom(b)
+        @test sum(values(m.splits)) < pr
+    end
+
     @testset "BranchModel algebra" begin
         q1 = BranchModel(UInt16, [1., -1.])
         q2 = BranchModel(UInt16, [2., -4.])
