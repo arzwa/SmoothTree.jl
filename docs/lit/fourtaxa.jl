@@ -12,7 +12,7 @@ function hybcoal(S)
     fname, io = mktemp()
     close(io)
     cmd = `/home/arzwa/bin/hybrid-coal -sp $(nwstr(S)) -o $fname`
-    run(pipeline(cmd, stderr="devnull"))
+    run(pipeline(cmd, stderr=devnull))
     xs = map(split, readlines(fname * ".prob"))
     run(`rm $fname $fname.prob`)
     Dict(readnw(string(x[1]))=>parse(Float64, x[2]) for x in xs)
@@ -108,15 +108,15 @@ vline!([θ[2]], color=:black, ls=:dot)
 
 # EP inference
 root = UInt16(15)
-Sprior = NatBMP(root)
-smple  = ranking(randtree(MomBMP(Sprior), 10000))
+bsd  = BetaSplitTree(-1., cladesize(root))
+Sprior = NatMBM(root, bsd)
 θprior = BranchModel(UInt16, SmoothTree.gaussian_mom2nat([mean(prior), std(prior)^2]))
-data  = CCD.(Y, lmap=m, α=0.)
+data  = MomMBM.(CCD.(Y, lmap=m), Ref(bsd), 1e-9)
 model = MSCModel(Sprior, θprior, m)
-alg   = EPABC(data, model, λ=0.1, α=1e-9, target=500, minacc=100, prunetol=1e-9)
+alg   = EPABC(data, model, λ=0.1, α=1e-9, target=500, minacc=100, prunetol=0.)
 trace = ep!(alg, 10);
-smple = ranking(randtree(MomBMP(trace[end].S), 10000))
-X1, X2 = traceback(trace)
+smple = ranking(randtree(MomMBM(trace[end].S), 10000))
+post  = alg.model
 
 xs = filter(x->size(x[2], 2) > 1, collect(X1))
 map(xs) do (k, x)
@@ -126,8 +126,8 @@ map(xs) do (k, x)
 end |> x-> plot(x..., size=(1200,500))
  
 # posterior approximation for the relevant branch lengths
-lm1, V1 = X2[3][end,:]
-lm2, V2 = X2[7][end,:]
+lm1, V1 = SmoothTree.gaussian_nat2mom(post.q[3])
+lm2, V2 = SmoothTree.gaussian_nat2mom(post.q[7])
 d1 = Normal(lm1, √V1)
 d2 = Normal(lm2, √V2)
 
