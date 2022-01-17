@@ -22,7 +22,8 @@ end
 # (from the mgf), which is approximately exp(-E[θ])
 
 T = UInt16
-S = nw"(((((A,B),C),(D,E)),(F,(G,H))),(I,J));"
+S = nw"(((A,B),C),(D,E));"
+#S = nw"(((((A,B),C),(D,E)),(F,(G,H))),(I,J));"
 #S = nw"(((((((((A,B),C),(D,E)),(F,(G,H))),I),(J,K)),L),M),(O,P));"
 #S = readnw(readline("docs/data/mammals-song/mltrees.nw"))
 #T = UInt64
@@ -46,12 +47,13 @@ ranking(G) .|> last
 #Sprior = NatBMP(CCD(unique(G), α=0.1))
 #smple  = ranking(randtree(MomBMP(Sprior), 10000))
 root = T(2^ntaxa - 1)
-Sprior = NatBMP(root)
+bsd  = BetaSplitTree(-1., cladesize(root))
+Sprior = NatMBM(root, bsd)
 priormean = 1.
 priorvar  = 5.
 θprior = BranchModel(T, SmoothTree.gaussian_mom2nat([log(priormean), priorvar]))
 
-data  = CCD.(G, lmap=m, α=1/2^(ntaxa-1))
+data  = MBM.(CCD.(G, lmap=m), bsd, 1/2^(ntaxa-1))
 model = MSCModel(Sprior, θprior, m)
 alg   = EPABC(data, model, λ=0.1, α=1/2^(ntaxa-1), prunetol=1e-9)
 

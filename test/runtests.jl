@@ -11,9 +11,11 @@ using StatsBase, Distributions
 
     @testset "Beta-splitting SparseSplits" begin
         γ = UInt8(15)
+        n = cladesize(γ)
         d = Dict{UInt8,Int}()
         # β = -3/2 -> PDA model (uniform onlabeled topologies)
-        b = SmoothTree.BetaSparseSplits(γ, d, -1.5, 1.)
+        beta = BetaSplitTree(-1.5, n)
+        b = SmoothTree.SparseSplits(γ, d, beta, 1.)
         m = SmoothTree.nat2mom(b)
         ps = m.η0 .* m.k
         @test sum(ps) == 1
@@ -26,10 +28,10 @@ using StatsBase, Distributions
         # possible topologies, whereas conditional on the first split
         # being unbalanced we have 12. 
         # β = 0. -> Yule model (coalescent, random joins)
-        b = SmoothTree.BetaSparseSplits(γ, d, 0., 1.)
+        b = SmoothTree.SparseSplits(γ, d, beta(0.), 1.)
         m = SmoothTree.nat2mom(b)
         ps = m.η0 .* m.k
-        @test sum(ps) == 1
+        @test sum(ps) ≈ 1
         @test ps[1] ≈ 2/3 && ps[2] ≈ 1/3
         # under the coalescent, the first coalescence leads to a state
         # with one cherry and two leaves, the next coalescence is in
@@ -37,14 +39,46 @@ using StatsBase, Distributions
         # to an unbalanced topology, in 1/3 cases joins the two leaves
         # to a second cherry, giving a balanced topology.
         d = Dict{UInt8,Int}(5=>2, 1=>1, 7=>4)
-        b = SmoothTree.BetaSparseSplits(γ, d, 0., 1.)
+        b = SmoothTree.SparseSplits(γ, d, beta(0.), 1.)
         m = SmoothTree.nat2mom(b)
         p = sum(m.η0 .* m.k) + sum(values(m.splits))
         pr = sum(values(m.splits))
         @test p ≈ 1.
-        b = SmoothTree.BetaSparseSplits(γ, d, 0., 10.)
+        b = SmoothTree.SparseSplits(γ, d, beta(0.), 10.)
         m = SmoothTree.nat2mom(b)
         @test sum(values(m.splits)) < pr
+        b = SmoothTree.SparseSplits(γ, d, beta(-1.5), 10e8)
+        m = SmoothTree.nat2mom(b)
+        @test sum(values(m.splits)) * 15 ≈ 7.
+        # with α very large we should be indistinguishable from the prior
+        # which is uniform on topologies for β=-1.5, the three
+        # represented root splits should represent 7/15 topologies
+    end
+
+    @testset "Beta split MBM, PDA test" begin
+        for n = 4:10
+            root = 2^n-1
+            bs = BetaSplitTree(-1.5, cladesize(root))
+            M = MomMBM(root, bs)
+            sims = randsplits(M, 10000) |> unique 
+            ls = logpdf.(Ref(M), sims)
+            @test all(ls .≈ log(1/SmoothTree.ntrees(n)))
+            # under β=-1.5, all trees are equally likely
+        end
+    end
+
+    @testset "Posterior MBM" begin        
+        bs = BetaSplitTree(-1., cladesize(ccd.root))
+        M1 = MomMBM(ccd, bs, 1e-6)
+        M2 = MomMBM(ccd, bs, 1.)
+        for i=1:100
+            x = randsplits(ccd)
+            l1 = logpdf(M1, x)
+            l2 = logpdf(M2, x)
+            l3 = logpdf(ccd, x)
+            @test l1 ≈ l3
+            #@test l2 < l3  # why is this not always true?
+        end
     end
 
     @testset "BranchModel algebra" begin

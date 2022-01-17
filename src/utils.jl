@@ -5,6 +5,9 @@ _spname(n::Node) = _spname(name(n))
 # ranking
 ranking(xs) = sort(collect(proportionmap(xs)), by=last, rev=true)
 
+# ntrees
+ntrees(n) = prod([2i-3 for i=3:n])
+
 # remove branch lengths
 topologize(tree) = topologize!(deepcopy(tree))
 function topologize!(tree)

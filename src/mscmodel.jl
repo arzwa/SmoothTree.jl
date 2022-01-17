@@ -61,7 +61,7 @@ Gaussian distributions for the branch parameters.
 """
 function matchmoments(trees, cavity::MSCModel{T}, α) where T
     m = shitmap(trees[1], T)  # XXX sucks?
-    S = NatMBM(CCD(trees, lmap=m, α=α))#, αroot=0.)) respect rooting?
+    S = NatMBM(CCD(trees, lmap=m), cavity.S.beta, α)#, αroot=0.)) respect rooting?
     q = matchmoments(trees, cavity.q)
     return MSCModel(S, q, cavity.m)
 end

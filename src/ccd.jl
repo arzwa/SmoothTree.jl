@@ -16,6 +16,8 @@
 #
 # XXX refactor to keep CCD as in Larget, separating it from the prior
 # model, i.e. CCD is just a data structure for observed splits
+#
+# XXX smap needlessly stores cherries
 
 # aliases
 const DefaultNode{T} = Node{T,NewickData{Float64,String}}
@@ -273,7 +275,7 @@ end
 # The contribution of a single split to the tree probability
 # currently assumes the uniform prior over splits.
 # XXX: this should actually replace `logccp`
-# XXX: convert to MBM for the probability under a posterior
+# XXX: skip this, instead convert to MBM for the probability under a posterior
 #function _splitp(ccd, γ, δ)
 #    n = cladesize(γ)
 #    α = getα(ccd, γ)

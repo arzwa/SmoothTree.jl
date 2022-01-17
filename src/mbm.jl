@@ -1,14 +1,21 @@
 # We have use for an abstract type here
 abstract type AbstractMBM{T,V} end
 
-# this is no more than a container of SparseSplits distributions
+# XXX: We might not need the MomMBM after all, perhaps only for
+# interpretability
+
+# XXX: to be correct, we should have the betasplit distribution also
+# transformed between moment/natural spaces, but we will not need it
+# in natural parameter space, since we store it for the sake of
+# unrepresented clades...
+
 """
     NatMBM
 
 A MBM model in natural parameter space.
 """
 struct NatMBM{T,V} <: AbstractMBM{T,V}
-    β::V
+    beta::BetaSplitTree{V}
     smap::Dict{T,SparseSplits{T,V}}
     root::T
 end
@@ -19,7 +26,7 @@ end
 A MBM model in moment parameter space.
 """
 struct MomMBM{T,V} <: AbstractMBM{T,V}
-    β::V
+    beta::BetaSplitTree{V}
     smap::Dict{T,SparseSplits{T,V}}
     root::T
 end
@@ -38,36 +45,36 @@ NatMBM(root::T, β) where T<:Integer = NatMBM(β, SplitDict{T}(), root)
 MomMBM(root::T, β) where T<:Integer = MomMBM(β, SplitDict{T}(), root)
 
 # natural parameter -> moment parameter
-MomMBM(x::NatMBM) = MomMBM(x.β, Dict(k=>nat2mom(x) for (k,x) in x.smap), x.root)
-NatMBM(x::MomMBM) = NatMBM(x.β, Dict(k=>mom2nat(x) for (k,x) in x.smap), x.root)
-
-# MBM with fixed outgroup, note we do not set the P to exactly 1,
-# because that leads to ill-defined NatMBMs
-#NatMBM(root, rootsplit) = NatMBM(MomMBM(root, rootsplit))
-#function MomMBM(root::T, rootsplit::T, ϵ=1e-16) where T
-#    split = min(rootsplit, root - rootsplit)
-#    d = Dict(split => 1. - ϵ)
-#    ρ = refsplit(root)
-#    n = _ns(cladesize(root))
-#    η0 = ϵ/(n-1)
-#    roots = SparseSplits(d, n, 1, η0, ρ)
-#    MomMBM(Dict(root=>roots), root)
-#end
+# XXX note: this ignores the beta split prior distribution
+MomMBM(x::NatMBM) = MomMBM(x.beta, Dict(k=>nat2mom(x) for (k,x) in x.smap), x.root)
+NatMBM(x::MomMBM) = NatMBM(x.beta, Dict(k=>mom2nat(x) for (k,x) in x.smap), x.root)
 
 # get the mean MBM implied by a Dirichlet-MBM
+"""
+    MomMBM(x::CCD, β::BetaSplitTree, α::Real)
+    NatMBM(...)
+
+Get the posterior mean Markov branching model assuming a Dirichlet
+prior distribution with parameter proportional to a Beta-splitting
+model and weight `α` (i.e. the Dirichlet parameter vector for each
+Categorical split distribution sums to `α`, so that `α` serves as a
+total pseudocount) and observed splits recorded in `x`.
+"""
 MomMBM(x::CCD, args...) = MomMBM(NatMBM(x, args...))
-function NatMBM(x::CCD, β, α)
-    smap = Dict(γ=>SparseSplits(γ, d, β, α) for (γ, d) in x.smap)
+function NatMBM(x::CCD, β::BetaSplitTree, α::Real)
+    # note that the ccd contains cherries, which is not informative
+    smap = Dict(γ=>SparseSplits(γ, d, β, α) for (γ, d) in x.smap if !ischerry(γ))
     NatMBM(β, smap, x.root)
 end
 
 # linear operations
+# XXX note: these ignore the beta split prior distribution
 function Base.:+(x::NatMBM{T,V}, y::NatMBM{T,V}) where {T,V}
     d = Dict(γ=>v for (γ, v) in x.smap)
     for (γ, v) in y.smap
         d[γ] = haskey(d, γ) ? d[γ] + v : v
     end
-    NatMBM(d, x.root) 
+    NatMBM(x.beta, d, x.root) 
 end
 
 function Base.:-(x::NatMBM{T,V}, y::NatMBM{T,V}) where {T,V}
@@ -75,11 +82,12 @@ function Base.:-(x::NatMBM{T,V}, y::NatMBM{T,V}) where {T,V}
     for (γ, v) in y.smap
         d[γ] = haskey(d, γ) ? d[γ] - v : -1.0*v
     end
-    NatMBM(d, x.root) 
+    NatMBM(x.beta, d, x.root) 
 end
 
+Base.:*(a::V, x::NatMBM{T,V}) where {T,V} = x*a
 function Base.:*(x::NatMBM{T,V}, a::V) where {T,V}
-    NatMBM(Dict(γ=>v*a for (γ,v) in x.smap), x.root)
+    NatMBM(x.beta, Dict(γ=>v*a for (γ,v) in x.smap), x.root)
 end
 
 # randtree for moment parameters
@@ -104,9 +112,35 @@ function _randwalk(node, model::MomMBM)
     return node
 end
 
+function randsplits(model::MomMBM{T}) where T
+    _randsplits(Tuple{T,T}[], model.root, model)
+end
+
+function _randsplits(splits, γ, model)
+    isleafclade(γ) && return splits
+    left = randsplit(model, γ)
+    rght = γ - left
+    push!(splits, (γ, min(left, rght)))
+    splits = _randsplits(splits, left, model)
+    splits = _randsplits(splits, rght, model)
+    return splits
+end
+
 function randsplit(m::MomMBM, γ)
     # a cherry clade has NaN entries in SparseSplits
-    haskey(m, γ) && !ischerry(γ) ? randsplit(m[γ]) : randsplit(γ, m.β)
+    haskey(m, γ) && !ischerry(γ) ? randsplit(m[γ]) : randsplit(m.beta, γ)
+end
+
+function logpdf(m::MomMBM, splits::Vector{T}) where T<:Tuple
+    ℓ = 0.
+    for (γ, δ) in splits
+        ℓ += splitpdf(m, γ, δ)
+    end
+    return ℓ
+end
+
+function splitpdf(m::MomMBM, γ, δ)
+    haskey(m, γ) ? log(m[γ][δ]) : logpdf(m.beta, γ, δ)
 end
 
 #"""

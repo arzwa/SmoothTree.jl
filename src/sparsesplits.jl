@@ -32,48 +32,27 @@ function Base.getindex(m::SparseSplits, δ)
     haskey(m.splits, δ) ? m.splits[δ] : m.η0[splitsize(m.γ, δ)]
 end
 
-# unnormalized beta-splitting density (n,i)
-function betasplitf(β, n, i) 
-    p = (2i == n ? 0.5 : 1.0)
-    β == Inf && return p * binomial(n,i)/_ns(n) 
-    p * gamma(β+1+i)*gamma(β+1+n-i)/(gamma(i+1)*gamma(n-i+1))
-end
-
-function betasplitpmf(β, n)
-    # use recursive formula from Jones?
-    ps = [betasplitf(β, n, i) for i=1:n÷2]
-    ps ./ sum(ps)
-end
-
-nsplits(n, i) = n == 2i ? binomial(n,i)÷2 : binomial(n,i)
-
-# we define the split size to be the size of the smaller clade, note
-# that this does not commute with the order on splits! i.e. a split
-# is identified by the subclade with smallest id but this id need not
-# be the id of the smallest subclade.
-splitsize(γ, δ) = min(cladesize(δ), cladesize(γ-δ))
-
 """
 Get a natural parameter SparseSplits object from split counts `d`,
 assuming the Beta-splitting Dirichlet prior with pseudo-count α and
 shape parameter `β`. 
 """
-function SparseSplits(γ, d::Dict{T,V}, β, α) where {T,V}
+function SparseSplits(γ, d::Dict{T,Int}, β, α) where T
     ρ = refsplit(γ)
-    s = cladesize(γ)       # clade size
-    ns = [nsplits(s, i) for i=1:s÷2] 
-    # pseudocounts at split level 
-    # XXX have to normalize the betasplit probability
-    ps = betasplitpmf(β, s)
-    as = [α * ps[i] / ns[i] for i=1:s÷2]
+    s = cladesize(γ) 
+    ns = nsplits.(s, 1:s÷2) 
+    as = α .* β.q[s-2]
     aρ = as[splitsize(γ, ρ)]
     pρ = haskey(d, ρ) ? log(aρ + d[ρ]) : log(aρ)  # unnormalized pr of split ρ
     η0 = log.(as) .- pρ 
-    xs = collect(d)
-    ks = splitsize.(Ref(γ), first.(xs))
-    dd = Dict(δ => log(as[k] + c) - pρ for (k, (δ, c)) in zip(ks, xs))
-    kc = counts(ks, 1:s÷2)
-    k  = ns .- kc
+    dd = Dict{T,Float64}()
+    kc = zeros(Int, s÷2)  # counter
+    for (δ, count) in d
+        k = splitsize(γ, δ)
+        dd[δ] = log(as[k] + count) - pρ
+        kc[k] += 1
+    end
+    k = ns .- kc
     SparseSplits(dd, γ, ns, k, η0, ρ)
 end
 # TODO should handle α=0
@@ -101,6 +80,7 @@ end
 
 # Sampling
 # a random split for a SparseSplits split distribution
+# Assumes moment parameter!
 function randsplit(x::SparseSplits)
     splitps = collect(x.splits)
     weights = last.(splitps)
@@ -114,43 +94,6 @@ function randsplit(x::SparseSplits)
         k = sample(1:length(x.n), Weights(x.η0 .* x.n))
         return randsplitofsize(x.γ, k)
     end
-end
-
-# a random split for the Beta splitting model
-function randsplit(γ, β)
-    s = cladesize(γ)
-    p = [betasplitf(β, s, i) for i=1:s÷2]
-    k = sample(1:length(p), Weights(p))
-    randsplitofsize(γ, k)
-end
-
-# a random split clade γ of size k 
-function randsplitofsize(γ::T, k) where T
-    g = digits(γ, base=2)  # binary expansion
-    n = sum(g)             # number of leaves
-    o = sort(shuffle(1:n)[1:k], rev=true)  # which leaves end up in left/right subclade
-    # o = [a,b] means we obtain a split by taking/removing the ath and
-    # bth leaf from γ. Note that this does not mean the ath and bth
-    # index in the binary expansion, but rather the ath and bth one in
-    # the binary expansion. The below ugliish while loop constructs
-    # the requirred binary expansion of the split from `o`.
-    j = pop!(o)
-    i = 1  # index over g
-    k = 1  # counts how many ones we've passed
-    while true
-        if g[i] == 1 && k == j
-            g[i] = 0
-            length(o) == 0 && break
-            j = pop!(o)
-            k += 1
-        elseif g[i] == 1
-            k += 1
-        end
-        i += 1
-    end
-    splt = T(evalpoly(2, g))
-    left = min(splt, γ - splt)
-    return left
 end
 
 # Define linear operations
