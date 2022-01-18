@@ -77,7 +77,7 @@ end
 #S = SmoothTree.MSC(nw"((A:Inf,B:Inf):0.2,C:Inf);")
 θ = 0.5
 S = readnw("((B:Inf,C:Inf):$θ,A:Inf);")
-m = SmoothTree.taxonmap(S)
+m = taxonmap(S)
 M = SmoothTree.MSC(S, m)
 N = 100
 Y = randtree(M, m, N)
@@ -94,15 +94,17 @@ pp = Dict(t=>p for (t,p) in zip(trees, pp))
 ppdf = postpdf(G, trees, m, prior)
 
 # EP
-Sprior = NatBMP(UInt16(7))
+bsd    = BetaSplitTree(-1.5, 3)
+Sprior = NatMBM(UInt16(7), bsd)
 θprior = SmoothTree.gaussian_mom2nat([log(1.), 5.])
 q      = BranchModel(UInt16, θprior )
-data   = CCD.(Y, lmap=m, α=0.)
+data   = CCD.(Y, lmap=m)
 model  = MSCModel(Sprior, q, m)
 alg    = EPABC(data, model, λ=0.1, α=1e-9, maxsim=1e5, target=500, minacc=100)
 
 trace  = ep!(alg, 10);
-smple  = ranking(randtree(MomBMP(trace[end].S), 10000))
+smple  = ranking(randtree(MomMBM(alg.model.S), 10000))
+relabel(first(smple)[1], m)
 
 combine(xs::Vector{<:Dict}) = Dict(k=>[x[k] for x in xs] for k in keys(xs[1]))
 

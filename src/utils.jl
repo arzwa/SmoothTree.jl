@@ -2,6 +2,9 @@
 _spname(x::String) = string(split(x, "_")[1])
 _spname(n::Node) = _spname(name(n))
 
+# the number of possible splits of a set of size n
+_ns(n) = 2^(n-1) - 1
+
 # ranking
 ranking(xs) = sort(collect(proportionmap(xs)), by=last, rev=true)
 
@@ -51,7 +54,7 @@ end
 
 # a taxonmap
 taxonmap(pair::Pair, T=UInt16) = taxonmap(first(pair), T)
-taxonmap(tree, T=UInt16) = taxonmap(name.(getleaves(tree)), T)
+taxonmap(tree::Node{T}) where T = taxonmap(name.(getleaves(tree)), T)
 
 function taxonmap(l::Vector{String}, T=UInt16)
     d = Dict(T(2^i)=>l[i+1] for i=0:length(l)-1)

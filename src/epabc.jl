@@ -1,6 +1,22 @@
 abstract type AbstractEPABC end
 
-# the main EP struct
+"""
+    EPABC(data, prior; kwargs...)
+
+Expectation-propagation approximate Bayesian computation (EP-ABC, or
+likelihood free EP) algorithm struct. See `ep!` and `pep!`.
+
+## References
+- Barthelmé, Simon, and Nicolas Chopin. 
+  "Expectation propagation for likelihood-free inference." 
+  Journal of the American Statistical Association 
+  109.505 (2014): 315-333.
+- Barthelmé, Simon, Nicolas Chopin, and Vincent Cottet. 
+  "Divide and conquer in ABC: Expectation-propagation algorithms 
+  for likelihood-free inference." 
+  Handbook of Approximate Bayesian Computation. 
+  Chapman and Hall/CRC, 2018. 415-434.
+"""
 @with_kw mutable struct EPABC{X,M} <: AbstractEPABC
     data ::X
     model::M
@@ -95,7 +111,7 @@ function ep_serial!(alg; rnd=true)
         update!(alg, full, cavity, i) 
     end 
     prune!(alg)
-    return alg.model
+    return trace
 end
 
 """
@@ -133,15 +149,18 @@ end
 function traceback(trace)
     clades = keys(trace[end].S.smap)
     splits = Dict(γ=>collect(keys(trace[end].S.smap[γ].splits)) for γ in clades)
+    qclade = keys(trace[end].q.cmap)
     traces = Dict(γ=>Vector{Float64}[] for γ in clades)
-    θtrace = Dict(γ=>Vector{Float64}[] for γ in clades)
+    θtrace = Dict(γ=>Vector{Float64}[] for γ in qclade)
     for i=length(trace):-1:1
-        bmp = SmoothTree.MomMBM(trace[i].S)
+        m = SmoothTree.MomMBM(trace[i].S)
         q = trace[i].q
         for γ in clades
-            x = map(δ->haskey(bmp, γ) ? bmp[γ][δ] : NaN, splits[γ])
-            y = gaussian_nat2mom(q[γ])
+            x = map(δ->haskey(m, γ) ? m[γ][δ] : NaN, splits[γ])
             push!(traces[γ], x)
+        end
+        for γ in qclade
+            y = gaussian_nat2mom(q[γ])
             push!(θtrace[γ], y)
         end
     end
@@ -149,176 +168,3 @@ function traceback(trace)
     θ = Dict(γ=>permutedims(hcat(reverse(xs)...)) for (γ, xs) in θtrace)
     return c, θ
 end
-
-
-#"""
-#    ep_iteration!(alg, i; kwargs...)
-#
-#Do an EP-ABC update for data point i, conducting simulations until we
-#get `target` accepted simulations or exceed a total of `maxn`
-#simulations. If the number of accepted draws is smaller than `mina`
-#the update failed, unless `fillup=true`, in which case the top `n`
-#simulations are added to the accepted replicates until `mina`
-#simulation replicates are obtained.
-#"""
-#function ep_iteration!(alg, i; mina=10, target=100, maxn=1e5,
-#                       noisy=false, fillup=false)
-#    @unpack data, model, sites = alg
-#    x = data[i]
-#    cavity = isassigned(sites, i) ? getcavity(model, sites[i]) : model
-#    S = randsptree(cavity)
-#    init = Dict(id(n)=>[id(n)] for n in getleaves(S))
-#    # XXX the init is where the gene to species mapping happens!
-#    sims = Tuple{Float64,typeof(S)}[]
-#    accepted = Tuple{Float64,typeof(S)}[]
-#    nacc = n = 0
-#    while true   # this could be parallelized to some extent using blocks
-#        n += 1
-#        G = randsplits(MSC(S, init))
-#        l = logpdf(x, G)
-#        noisy && n % 1000 == 0 && (@info "$n $l")
-#        if log(rand()) < l
-#            nacc += 1
-#            noisy && (@info "accepted! $l ($nacc)")
-#            push!(accepted, (l, S))
-#        else
-#            push!(sims, (l, S))
-#        end
-#        (n ≥ maxn || nacc ≥ target) && break
-#        S = randsptree(cavity)
-#    end
-#    if nacc < mina && !fillup
-#        return false, nacc, n, alg.model, cavity
-#    elseif nacc < mina  # fill up
-#        top = sort(sims, by=first, rev=true)[1:(mina-nacc)]
-#        noisy && (@info "added top $(mina-nacc), <ℓ>=$(mean(first.(top)))")
-#        push!(accepted, top...)
-#    end
-#    acc_S = last.(accepted)
-#    acc_l = first.(accepted)
-#    model_ = updated_model(acc_S, model, cavity, alg)
-#    site_  = new_site(model_, cavity)
-#    return true, nacc, n, model_, site_
-#end
-##function ep_iteration!(alg, i; mina=10, target=100, maxn=1e5, noisy=false, adhoc=0.)
-##    @unpack data, model, sites = alg
-##    x = data[i]
-##    cavity = isassigned(sites, i) ? getcavity(model, sites[i]) : model
-##    S = randsptree(cavity)
-##    init = Dict(id(n)=>[id(n)] for n in getleaves(S))
-##    # XXX the init is where the gene to species mapping happens!
-##    accepted = typeof(S)[]
-##    nacc = n = 0
-##    while true   # this could be parallelized to some extent using blocks
-##        n += 1
-##        G = randsplits(MSC(S, init))
-##        l = logpdf(x, G) + adhoc
-##        noisy && n % 1000 == 0 && (@info "$n $l")
-##        if log(rand()) < l
-##            noisy && (@info "accepted! ($nacc)")
-##            push!(accepted, S)
-##            nacc += 1
-##        end
-##        (n ≥ maxn || nacc ≥ target) && break
-##        S = randsptree(cavity)
-##    end
-##    nacc < mina && return false, nacc, n, alg.model, cavity
-##    model_ = updated_model(accepted, model, cavity, alg)
-##    site_  = new_site(model_, cavity)
-##    return true, nacc, n, model_, site_
-##end
-#
-#"""
-#    ep_pass!(alg; k=1, kwargs...)
-#
-#Do a full serial EP pass over the data.
-#"""
-#function ep_pass!(alg; k=1, rnd=true, kwargs...) 
-#    rnge = rnd ? shuffle(1:length(alg.data)) : 1:length(alg.data)
-#    iter = ProgressBar(rnge)
-#    nacc = n = 0
-#    trace = map(iter) do i
-#        set_description(iter, string(@sprintf("pass%2d%4d%4d/%6d", k, i, nacc, n)))
-#        accepted, nacc, n, model, site = ep_iteration!(alg, i; kwargs...)
-#        if accepted
-#            alg.sites[i] = site
-#            alg.model = model
-#        end
-#        model
-#    end 
-#end
-#
-#"""
-#    ep!(alg, n=1; kwargs...)
-#
-#Do n EP passes.
-#"""
-#ep!(alg, n=1; kwargs...) = mapreduce(i->ep_pass!(alg; k=i, kwargs...), vcat, 1:n)
-#
-## trace back to analyze the EP approximation
-#function traceback(trace)
-#    clades = keys(trace[end].S.smap)
-#    splits = Dict(γ=>collect(keys(trace[end].S.smap[γ].splits)) for γ in clades)
-#    traces = Dict(γ=>Vector{Float64}[] for γ in clades)
-#    θtrace = Dict(γ=>Vector{Float64}[] for γ in clades)
-#    for i=length(trace):-1:1
-#        bmp = SmoothTree.MomMBM(trace[i].S)
-#        q = trace[i].q
-#        for γ in clades
-#            x = map(δ->haskey(bmp, γ) ? bmp[γ][δ] : NaN, splits[γ])
-#            y = [gaussian_nat2mom(q[γ]...)...]
-#            push!(traces[γ], x)
-#            push!(θtrace[γ], y)
-#        end
-#    end
-#    c = Dict(γ=>permutedims(hcat(reverse(xs)...)) for (γ, xs) in traces)
-#    θ = Dict(γ=>permutedims(hcat(reverse(xs)...)) for (γ, xs) in θtrace)
-#    return c, θ
-#end
-#
-#
-## parallelizable
-#function pep_iteration!(alg, i; mina=10, target=100, maxn=1e5, fillup=false)
-#    @unpack data, model, sites = alg
-#    cavity = isassigned(sites, i) ? getcavity(model, sites[i]) : model
-#    sptree = randsptree(cavity)
-#    # NOTE: the init is where the gene to species mapping happens!
-#    init = Dict(id(n)=>[id(n)] for n in getleaves(sptree))
-#    S = typeof(sptree)
-#    accsims = Tuple{Float64,S}[]
-#    othsims = Tuple{Float64,S}[]
-#    nacc = n = 0
-#    while true   # this could be parallelized to some extent using blocks
-#        n += 1
-#        G = randsplits(MSC(sptree, init))
-#        l = logpdf(data[i], G)
-#        if log(rand()) < l
-#            nacc += 1
-#            push!(accsims, (l, sptree))
-#        else
-#            push!(othsims, (l, sptree))
-#        end
-#        (n ≥ maxn || nacc ≥ target) && break
-#        sptree = randsptree(cavity)
-#    end
-#    if nacc < mina  # fill up
-#        top = sort(othsims, by=first, rev=true)[1:(mina-nacc)]
-#        push!(accsims, top...)
-#    end
-#    acc_S = last.(accsims)
-#    acc_l = first.(accsims)
-#    model_ = updated_model(acc_S, model, cavity, alg)
-#    site_  = new_site(model_, cavity)
-#    return nacc, n, site_
-#end
-#
-## parallel EP pass
-#function pep_pass!(alg; k=1, kwargs...)
-#    iter = ProgressBar(1:length(alg.data))
-#    Threads.@threads for i in iter
-#        nacc, n, site = pep_iteration!(alg, i; kwargs...) 
-#        alg.sites[i] = site
-#        set_description(iter, string(@sprintf("pass%2d%4d%4d/%6d", k, i, nacc, n)))
-#    end
-#end
-

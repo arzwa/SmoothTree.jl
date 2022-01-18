@@ -21,13 +21,15 @@ end
 # Note, if one assumes θ ~ Gamma(α, 1/β), then E[exp(-θ)] = (1+1/β)^-k
 # (from the mgf), which is approximately exp(-E[θ])
 
-T = UInt16
-S = nw"(((A,B),C),(D,E));"
+#T = UInt16
+#S = nw"(((A,B),C),(D,E));"
 #S = nw"(((((A,B),C),(D,E)),(F,(G,H))),(I,J));"
 #S = nw"(((((((((A,B),C),(D,E)),(F,(G,H))),I),(J,K)),L),M),(O,P));"
+T = UInt64
+S = readnw("(((((((((((A,B),C),(D,E)),(F,(G,H))),I),(J,K)),L),M),(O,P)),Q),((R,S),T));", T)
 #S = readnw(readline("docs/data/mammals-song/mltrees.nw"))
 #T = UInt64
-#S = readnw(nwstr(S[1][1][2][1][1]), T)
+#S = readnw(nwstr(S[1][1][2][1]), T)
 #S = readnw(nwstr(S[1][1][2][1]), T)
 ntaxa = length(getleaves(S))
 l = SmoothTree.n_internal(S)
@@ -47,21 +49,19 @@ ranking(G) .|> last
 #Sprior = NatBMP(CCD(unique(G), α=0.1))
 #smple  = ranking(randtree(MomBMP(Sprior), 10000))
 root = T(2^ntaxa - 1)
-bsd  = BetaSplitTree(-1., cladesize(root))
+bsd  = BetaSplitTree(-1.5, cladesize(root))
 Sprior = NatMBM(root, bsd)
 priormean = 1.
-priorvar  = 5.
+priorvar  = 2.
 θprior = BranchModel(T, SmoothTree.gaussian_mom2nat([log(priormean), priorvar]))
 
-data  = MBM.(CCD.(G, lmap=m), bsd, 1/2^(ntaxa-1))
+data  = MomMBM.(CCD.(G, lmap=m), Ref(bsd), 1/2^(ntaxa-1))
 model = MSCModel(Sprior, θprior, m)
-alg   = EPABC(data, model, λ=0.1, α=1/2^(ntaxa-1), prunetol=1e-9)
-
-#_ = SmoothTree.ep_iteration!(alg, 1, maxn=1e5, mina=10, target=100, noisy=true, adhoc=true)
+alg   = EPABC(data, model, λ=0.1, α=1/2^(ntaxa-1), prunetol=1e-6, minacc=50, target=100)
 
 # EP
 #trace = pep!(alg, 1)
-trace = ep!(alg, 5)
+trace = ep!(alg, 2)
 
 smple = ranking(randtree(alg.model.S, 10000))
 SmoothTree.topologize(S)
@@ -83,7 +83,7 @@ clades = filter(n->!SmoothTree.isleafclade(n), id.(postwalk(mapS)))[1:end-1]
 pls = map(clades) do g
     plot(Normal(log(priormean), √priorvar), color=:lightgray,
          fill=true, fillalpha=0.8, xlim=(-4.5,4.5), yticks=false, grid=false)
-    for model in trace
+    for model in trace[1:20:end]
         lm, V = SmoothTree.gaussian_nat2mom(model.q[g])
         plot!(Normal(lm, √V), color=:black)
     end

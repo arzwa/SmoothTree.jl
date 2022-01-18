@@ -62,6 +62,7 @@ total pseudocount) and observed splits recorded in `x`.
 """
 MomMBM(x::CCD, args...) = MomMBM(NatMBM(x, args...))
 function NatMBM(x::CCD, β::BetaSplitTree, α::Real)
+    α == 0. && @warn "α = 0 is not well defined"
     # note that the ccd contains cherries, which is not informative
     smap = Dict(γ=>SparseSplits(γ, d, β, α) for (γ, d) in x.smap if !ischerry(γ))
     NatMBM(β, smap, x.root)
@@ -143,41 +144,41 @@ function splitpdf(m::MomMBM, γ, δ)
     haskey(m, γ) ? log(m[γ][δ]) : logpdf(m.beta, γ, δ)
 end
 
-#"""
-#    prune
-#
-#Prune a sparsely represented MBM object by setting all represented
-#splits with split probabilities indistinguishable from the probability
-#of an unrepresented split to the latter (thereby removing the split
-#from the set of explicitly represented splits).
-#"""
-#function prune(x::M, atol) where {T,V,M<:AbstractMBM{T,V}}
-#    newd = Dict{T,SparseSplits{T,V}}()
-#    clades = Set(x.root)
-#    # first we prune all splits with negligible probability
-#    for (γ, x) in x.smap
-#        newd[γ] = prune(x, atol)
-#        union!(clades, keys(newd[γ].splits))
-#    end
-#    # then we prune clades which feature explicitly in none of the
-#    # split distributions
-#    toprune = setdiff(keys(newd), clades)
-#    for γ in toprune
-#        delete!(newd, γ)
-#    end
-#    return M(newd, x.root)
-#end
-#
-#function prune!(x::M, atol) where {T,V,M<:AbstractMBM{T,V}}
-#    clades = Set(x.root)
-#    for (γ, x) in x.smap
-#        prune!(x, atol)
-#        union!(clades, keys(x.splits))
-#    end
-#    toprune = setdiff(keys(x.smap), clades)
-#    for γ in toprune
-#        delete!(x.smap, γ)
-#    end
-#end
+"""
+    prune
+
+Prune a sparsely represented MBM object by setting all represented
+splits with split probabilities indistinguishable from the probability
+of an unrepresented split to the latter (thereby removing the split
+from the set of explicitly represented splits).
+"""
+function prune(x::M, atol) where {T,V,M<:AbstractMBM{T,V}}
+    newd = Dict{T,SparseSplits{T,V}}()
+    clades = Set(x.root)
+    # first we prune all splits with negligible probability
+    for (γ, x) in x.smap
+        newd[γ] = prune(x, atol)
+        union!(clades, keys(newd[γ].splits))
+    end
+    # then we prune clades which feature explicitly in none of the
+    # split distributions
+    toprune = setdiff(keys(newd), clades)
+    for γ in toprune
+        delete!(newd, γ)
+    end
+    return M(newd, x.root)
+end
+
+function prune!(x::M, atol) where {T,V,M<:AbstractMBM{T,V}}
+    clades = Set(x.root)
+    for (γ, x) in x.smap
+        prune!(x, atol)
+        union!(clades, keys(x.splits))
+    end
+    toprune = setdiff(keys(x.smap), clades)
+    for γ in toprune
+        delete!(x.smap, γ)
+    end
+end
 
 

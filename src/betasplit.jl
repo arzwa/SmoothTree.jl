@@ -5,7 +5,7 @@
 # once...
 
 """
-    BetaSplitTree
+    BetaSplitTree(β, n)
 
 Stores the relevant pmf's for a Beta-splitting Markov branching model
 on cladograms.
@@ -17,7 +17,13 @@ on cladograms.
 - `q`: Beta-splitting probabilities *per split*, i.e. probability of a
   split of size i of a clade of size k is `p[k-2][i]/binomial(k,i)` when
   2i ≠ k.  
-- `n`: root clade size
+- `n`: root clade *size*
+
+## References
+- Aldous, David. "Probability distributions on cladograms." Random
+  discrete structures. Springer, New York, NY, 1996. 1-18.
+- Jones, Graham R. "Tree models for macroevolution and phylogenetic
+  analysis." Systematic biology 60.6 (2011): 735-746.
 """
 struct BetaSplitTree{T}
     β::T
@@ -60,6 +66,12 @@ nsplits(n, i) = n == 2i ? binomial(n,i)÷2 : binomial(n,i)
 # be the id of the smallest subclade.
 splitsize(γ, δ) = min(cladesize(δ), cladesize(γ-δ))
 
+"""
+    logpdf(m::BetaSplitTree, γ, δ)
+
+Get the log-probability of observing clade `γ` with split `δ` under
+the Beta-splitting model `m`.
+"""
 function logpdf(m::BetaSplitTree, γ, δ)
     s = cladesize(γ)
     s <= 2 && return 0.
@@ -67,16 +79,25 @@ function logpdf(m::BetaSplitTree, γ, δ)
     return log(m.q[s-2][i])
 end
 
-# a random split of clade γ for the Beta splitting model
-function randsplit(model::BetaSplitTree, γ)
+"""
+    randsplit(m::BetaSplitTree, γ)
+
+Generate a random split of clade `γ` for the Beta splitting model `m`
+"""
+function randsplit(m::BetaSplitTree, γ)
     s = cladesize(γ)
     s <= 3 && return randsplitofsize(γ, 1)
-    p = model.p[s-2]
+    p = m.p[s-2]
     k = sample(1:length(p), Weights(p))
     randsplitofsize(γ, k)
 end
 
 # a random split clade γ of size k 
+"""
+    randsplitofsize(γ, k)
+
+Pick a split uniformly from the set of splits of size `k` in clade `γ`.
+"""
 function randsplitofsize(γ::T, k) where T
     g = digits(γ, base=2)  # binary expansion
     n = sum(g)             # number of leaves

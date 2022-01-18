@@ -127,3 +127,25 @@ function Base.:*(x::SparseSplits{T,V}, a::V) where {T,V}
     SparseSplits(d, x.γ, x.n, x.k, a .* x.η0, x.ref)
 end
 
+"""
+    prune(x::SparseSplits, atol=1e-9)
+
+Prune out splits which are barely supported (have η ≈ η0, with
+absolute tolerance `atol`)
+"""
+function prune(x::SparseSplits{T,V}, atol) where {T,V}
+    d = Dict{T,V}()
+    for (k,v) in x.splits
+        s = splitsize(x.γ, k)
+        !(isapprox(v, x.η0[s], atol=atol)) && (d[k] = v)
+    end 
+    # should we adjust η0?
+    SparseSplits(d, x.n, length(d), x.η0, x.ref) 
+end
+
+function prune!(x::SparseSplits, atol)
+    for (k,v) in x.splits
+        s = splitsize(x.γ, k)
+        isapprox(v, x.η0[s], atol=atol) && delete!(x.splits, k)
+    end 
+end

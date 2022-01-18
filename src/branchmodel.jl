@@ -142,17 +142,6 @@ end
 # probability 1 clades with two leaves from the smap (since they need
 # not be represented explicitly), however, their clade in the branch
 # model should not be removed!
-#function prune(m::BranchModel, x::AbstractBMP)
-#    d = Dict(γ=>m[γ] for γ in keys(x.smap))
-#    BranchModel(d, m.η0)
-#end
-#
-#function prune!(m::BranchModel, x::AbstractBMP)
-#    for γ in setdiff(keys(m.cmap), keys(x.smap))
-#        delete!(m.cmap, γ)
-#    end
-#end
-
 function prune(m::BranchModel, atol)
     d = Dict(γ=>v for (γ,v) in m.cmap if all(isapprox(v, m.η0, atol=atol)))
     BranchModel(d, m.η0)

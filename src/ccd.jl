@@ -1,5 +1,4 @@
 # Arthur Zwaenepoel 2021
-# Currently only thought about rooted trees
 
 # Rooted/unrooted? If all input trees are (arbitrarily) rooted at some
 # taxon, when α=0, we'll have that all trees from the CCD are rooted
@@ -9,6 +8,11 @@
 # the unrooted we'll have different distributions. In the unrooted
 # case, represented by an arbitrary rooting, we should have that the
 # root split is certain, despite α>1 (this sounds a bit confusing).
+
+# Note: clades are simply represented by integers, whose binary
+# expansion is a bitstring recording presence/absence of leaf clades.
+# In other words the clade with id 13 is clade 1101, representing the
+# clade containing of leaf 4, leaf 3 and leaf 1.
 
 # XXX reconsider the taxon map stuff
 # We might do away with it altogether, requiring appropriately labeled
@@ -24,27 +28,34 @@ const DefaultNode{T} = Node{T,NewickData{Float64,String}}
 const Splits{T} = Vector{Tuple{T,T}}
 
 """
-    CCD
+    CCD(trees::Vector; [lmap=taxon_map])
+    CCD(trees::AbstractDict; [lmap=taxon_map])
 
-A conditional clade distribution object.
+A conditional clade distribution (CCD) object. 
+
+Input data can be either a vector of trees or a countmap of trees (see
+`StatsBase.countmap`).
+
+# Examples
+```jldoctest
+julia> ccd = CCD([nw"((A,B),C);", nw"((B,C),A);", nw"((A,B),C);"])
+CCD{UInt16}(n=3, Γ=7)
+```
 """
-mutable struct CCD{T,V}
+struct CCD{T,V}
     lmap::BiMap{T,String}
     cmap::Dict{T,V}          # clade counts
     smap::Dict{T,Dict{T,V}}  # split counts
     root::T
 end
 
-nl(X::CCD) = length(X.lmap)
-nc(X::CCD) = length(X.cmap)
-
-function Base.show(io::IO, X::CCD{T}) where T
-    write(io, "CCD{$T}(n=$(nl(X)), Γ=$(X.root))")
-end
-
-function showclades(X::CCD)
-    sort([(k, bitstring(k), v) for (k,v) in X.cmap])
-end
+# some Base methods
+Base.haskey(x::CCD, γ) = haskey(x.cmap, γ)
+Base.haskey(x::CCD, γ, δ) = haskey(x.smap, γ) && haskey(x.smap[γ], δ)
+Base.getindex(x::CCD, γ) = haskey(x, γ) ? x.cmap[γ] : 0
+Base.getindex(x::CCD, γ, δ) = haskey(x, γ, δ) ? x.smap[γ][δ] : 0
+Base.show(io::IO, X::CCD) = write(io, "CCD(n=$(length(X.lmap)), Γ=$(X.root))")
+showclades(X::CCD) = sort([(k, bitstring(k), v) for (k,v) in X.cmap])
 
 # leaf names
 NewickTree.getleaves(x::CCD) = collect(keys(x.lmap))
@@ -62,12 +73,13 @@ cladesize(clade) = count_ones(clade)
 rootclade(n, T=UInt16) = T(2^n - 1) 
 
 # conditional clade probability
-ccp(ccd::CCD, γ, δ) = ccd.smap[γ][δ] / ccd.cmap[γ]
-logccp(ccd, γ, δ) = log(ccd.smap[γ][δ]) - log(ccd.cmap[γ])
+ccp(ccd::CCD, γ, δ) = ccd[γ,δ] / ccd[γ]
+logccp(ccd, γ, δ) = log(ccd[γ,δ]) - log(ccd[γ])
 
 # uniform weights for a given vector of elements 
 uweights(xs) = fill(1/length(xs), length(xs))
 
+# Constructors
 # from a countmap
 CCD(trees::AbstractDict; kwargs...) = CCD(collect(trees); kwargs...)
 
@@ -78,7 +90,7 @@ CCD(tree::Node; kwargs...) = CCD([tree]; kwargs...)
 function CCD(trees; lmap=taxonmap(trees[1], UInt16))
     ccd = initccd(lmap)
     for tree in trees
-        ccd = addtree!(ccd, tree)
+        addtree!(ccd, tree)
     end
     return ccd
 end
@@ -114,7 +126,6 @@ function addtree!(ccd::CCD, tree::Node, w=1)
         end
     end
     walk(tree)
-    return ccd
 end
 
 # should we use defaultdict instead?
@@ -126,13 +137,6 @@ function _update!(m1, m2, y, x)
         m2[y][x] = 0
     end
 end
-
-# check whether a split is present in the (observed part of) a ccd
-inccd(ccd, γ, δ) = haskey(ccd.cmap, γ) && haskey(ccd.smap[γ], δ)
-inccd(ccd, γ) = haskey(ccd.cmap, γ) && !(ccd.cmap[γ] == 0)
-
-# the number of possible splits of a set of size n
-_ns(n) = 2^(n-1) - 1
 
 # get the modal tree? this uses a greedy algorithm, not sure if
 # guaranteed to give the mode?
@@ -173,65 +177,6 @@ function _randwalk1(splits, clade, ccd)
     return splits
 end
 
-# α > 0. case
-# XXX convert to MBM instead!
-#function _randwalk2(splits, clade, ccd)
-#    isleafclade(clade) && return splits 
-#    left = if !inccd(ccd, clade)
-#        # uniform random split XXX: this is a bit weird, since
-#        # unobserved clades can lead to splits which contain observed
-#        # clade, but we don't account for that...
-#        splt = randsplit(clade)
-#        left = min(splt, clade - splt)
-#    else
-#        α = getα(ccd, clade)
-#        csplits = collect(ccd.smap[clade])
-#        observed_splits = first.(csplits)
-#        weights = last.(csplits)
-#        k = length(csplits)   # number of splits
-#        n = cladesize(clade)  
-#        N = ccd.cmap[clade]
-#        # probability of an observed split
-#        denom = log(α * _ns(n) + N)
-#        #lpobs = log(k*ccd.α + N) - denom
-#        lpobs = log(N) - denom
-#        if log(rand()) < lpobs 
-#            # observed split
-#            splt = sample(1:k, Weights(weights))
-#            left = observed_splits[splt]
-#        else  
-#            # unobserved split
-#            left = randsplit(clade)
-#            #while left ∈ observed_splits  # XXX rejection sampler
-#            #    left = randsplit(clade)
-#            #end
-#            left
-#        end
-#    end
-#    rght = clade - left
-#    push!(splits, (clade, left))
-#    splits = _randwalk2(splits, left, ccd)
-#    splits = _randwalk2(splits, rght, ccd)
-#    return splits
-#end
-
-# could be more efficient I guess, also requires the number 2^(n-1),
-# which becomes prohibitive for large n
-#function randsplit(γ::T) where T
-#    g = digits(γ, base=2)
-#    n = sum(g)
-#    x = rand(1:_ns(n))
-#    d = digits(x, base=2)
-#    tips = [(i-1) for (i,gi) in enumerate(g) if gi == 1]
-#    subclade = 0
-#    for i=1:length(d)
-#        subclade += d[i] * 2^tips[i]
-#    end
-#    splt = T(subclade)
-#    left = min(splt, γ - splt)
-#    return left
-#end
-
 # obtain a gene tree from a split set
 function treefromsplits(splits::Splits{T}, names) where T
     nodes = Dict{T,DefaultNode{T}}()
@@ -266,24 +211,10 @@ randtree(model, n) = map(_->randtree(model), 1:n)
 function logpdf(ccd::CCD, splits::Vector{T}) where T<:Tuple
     ℓ = 0.
     for (γ, δ) in splits
-        #ℓ += _splitp(ccd, γ, δ)
         ℓ += logccp(ccd, γ, δ)
     end
     return ℓ
 end
-
-# The contribution of a single split to the tree probability
-# currently assumes the uniform prior over splits.
-# XXX: this should actually replace `logccp`
-# XXX: skip this, instead convert to MBM for the probability under a posterior
-#function _splitp(ccd, γ, δ)
-#    n = cladesize(γ)
-#    α = getα(ccd, γ)
-#    Z = α * _ns(n)
-#    Z += inccd(ccd, γ) ? ccd.cmap[γ] : 0
-#    nδ = inccd(ccd, γ, δ) ? ccd.smap[γ][δ] : 0
-#    log(α + nδ) - log(Z)
-#end
 
 # compute the probability mass of a single tree under the CCD
 function logpdf(ccd::CCD, tree::Node)
@@ -297,7 +228,6 @@ function _lwalk(n::Node, ccd, ℓ)
     ℓ, rght = _lwalk(n[2], ccd, ℓ)
     δ = left < rght ? left : rght
     γ = left + rght
-    #ℓ += _splitp(ccd, γ, δ) 
     ℓ += logccp(ccd, γ, δ) 
     return ℓ, γ
 end
@@ -316,3 +246,16 @@ function logpdf(ccd::CCD, trees::Dict)
     return l
 end
 
+# compute the marginal likelihood for a bunch of splits on a subset of
+# the leaves of a given ccd.
+function marginallogpdf(ccd::CCD, splits)
+    # XXX assume splits are sorted with rootsplit last! (output of MSC
+    # simulation, not MBM simulation!)
+    _marginal(ccd, ccd.root, splits, splits[end]...)
+end
+
+# γ is the clade in the CCD, c the clade in the data, d the split
+# under consideration
+function _marginal(ccd, γ, splits, c, d)
+    
+end
