@@ -26,8 +26,14 @@ likelihood free EP) algorithm struct. See `ep!` and `pep!`.
     minacc = 100
     target = 500
     maxsim = 1e5 
-    fillup = true
+    r = 1.
+    tuner = true
     prunetol = 0.
+end
+
+function tuneoff!(alg)
+    alg.r = 1.
+    alg.tuner = false
 end
 
 function EPABC(data, prior::T; kwargs...) where T
@@ -46,8 +52,8 @@ end
 getcavity(i, m, s) = isassigned(s, i) ? m - s[i] : m
 
 function ep_iteration(alg, i)
-    @unpack data, model, sites, λ, α = alg
-    @unpack minacc, target, maxsim, fillup = alg
+    @unpack data, model, sites, λ, α, r = alg
+    @unpack minacc, target, maxsim, tuner = alg
     X = alg.data[i]
     cavity = getcavity(i, model, sites)
     smpler = MSCSampler(cavity)
@@ -55,30 +61,34 @@ function ep_iteration(alg, i)
     init = Dict(id(n)=>[id(n)] for n in getleaves(sptree))
     S = typeof(sptree)
     accsims = Tuple{Float64,S}[]
-    othsims = Tuple{Float64,S}[]
+    allsims = Tuple{Float64,S}[]
     nacc = n = 0
     while true   # this could be parallelized to some extent using blocks
         n += 1
         G = randsplits(MSC(sptree, init))
         l = logpdf(data[i], G)
-        if log(rand()) < l
+        if log(rand()/r) < l
             nacc += 1
             push!(accsims, (l, sptree))
-        else
-            push!(othsims, (l, sptree))
         end
+        push!(allsims, (l, sptree))
         (n ≥ maxsim || nacc ≥ target) && break
         sptree = randtree(smpler)
     end
-    if (nacc < minacc) && !fillup  # failed update
-        full = model
-    else
-        top = sort(othsims, by=first, rev=true)[1:(minacc-nacc)]
-        push!(accsims, top...)
-        accS = last.(accsims)
-        full = matchmoments(accS, cavity, alg.α)
+    if tuner # we are tuning r
+        ls = first.(allsims)
+        Ep = exp(logsumexp(ls))/n  # expected number of accepted simulations
+        r  = nacc < target || r != 1. ? max(1., target / (maxsim * Ep)) : r
+        # if we did not reach the target, the new r is better for the
+        # current set of simulations.
+        if nacc < target
+            accsims = filter(x->log(rand()/r) < x[1], allsims)
+            nacc = length(accsims)
+        end
     end
-    return nacc, n, full, cavity, accsims
+    full = nacc < minacc ? # not enough accepted simulations
+        model : matchmoments(last.(accsims), cavity, alg.α)
+    return nacc, n, r, full, cavity, accsims
 end
 
 """
@@ -106,8 +116,10 @@ function ep_serial!(alg; rnd=true)
     iter = ProgressBar(rnge)
     nacc = n = 0
     trace = map(iter) do i
-        set_description(iter, string(@sprintf("%4d%4d/%6d", i, nacc, n)))
-        nacc, n, full, cavity, _ = ep_iteration(alg, i)
+        desc = string(@sprintf("%8.3g%4d%4d/%6d", alg.r, i, nacc, n))
+        set_description(iter, desc)
+        nacc, n, r, full, cavity, _ = ep_iteration(alg, i)
+        alg.r = r
         update!(alg, full, cavity, i) 
     end 
     prune!(alg)
@@ -123,9 +135,10 @@ function ep_parallel!(alg)
     N = length(alg.data)
     iter = ProgressBar(1:N)
     Threads.@threads for i in iter
-        nacc, n, full, cavity, _ = ep_iteration(alg, i)
+        nacc, n, r, full, cavity, _ = ep_iteration(alg, i)
         alg.sites[i] = full - cavity
-        set_description(iter, string(@sprintf("%4d%4d/%6d", i, nacc, n)))
+        desc = string(@sprintf("%8.3g%4d%4d/%6d", r, i, nacc, n))
+        set_description(iter, desc)
     end
     alg.sites[1:N] .= map(x->alg.λ*x, alg.sites[1:N])
     alg.model = reduce(+, alg.sites)

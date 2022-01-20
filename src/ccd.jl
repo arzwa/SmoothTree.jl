@@ -213,13 +213,13 @@ function logpdf(ccd::CCD, splits::Vector{T}) where T<:Tuple
     for (γ, δ) in splits
         ℓ += logccp(ccd, γ, δ)
     end
-    return ℓ
+    return isnan(ℓ) ? -Inf : ℓ
 end
 
 # compute the probability mass of a single tree under the CCD
 function logpdf(ccd::CCD, tree::Node)
     ℓ, _ = _lwalk(tree, ccd, 0.)
-    return ℓ
+    return isnan(ℓ) ? -Inf : ℓ
 end
 
 function _lwalk(n::Node, ccd, ℓ)

@@ -21,12 +21,12 @@ end
 # Note, if one assumes θ ~ Gamma(α, 1/β), then E[exp(-θ)] = (1+1/β)^-k
 # (from the mgf), which is approximately exp(-E[θ])
 
-#T = UInt16
+T = UInt16
 #S = nw"(((A,B),C),(D,E));"
 #S = nw"(((((A,B),C),(D,E)),(F,(G,H))),(I,J));"
-#S = nw"(((((((((A,B),C),(D,E)),(F,(G,H))),I),(J,K)),L),M),(O,P));"
-T = UInt64
-S = readnw("(((((((((((A,B),C),(D,E)),(F,(G,H))),I),(J,K)),L),M),(O,P)),Q),((R,S),T));", T)
+S = nw"(((((((((A,B),C),(D,E)),(F,(G,H))),I),(J,K)),L),M),(O,P));"
+#T = UInt64
+#S = readnw("(((((((((((A,B),C),(D,E)),(F,(G,H))),I),(J,K)),L),M),(O,P)),Q),((R,S),T));", T)
 #S = readnw(readline("docs/data/mammals-song/mltrees.nw"))
 #T = UInt64
 #S = readnw(nwstr(S[1][1][2][1]), T)
@@ -57,11 +57,14 @@ priorvar  = 2.
 
 data  = MomMBM.(CCD.(G, lmap=m), Ref(bsd), 1/2^(ntaxa-1))
 model = MSCModel(Sprior, θprior, m)
-alg   = EPABC(data, model, λ=0.1, α=1/2^(ntaxa-1), prunetol=1e-6, minacc=50, target=100)
+alg   = EPABC(data, model, λ=0.1, α=1/2^(ntaxa-1), prunetol=1e-6,
+              minacc=50, target=100)
 
 # EP
-#trace = pep!(alg, 1)
+trace = pep!(alg, 1)
+
 trace = ep!(alg, 2)
+
 
 smple = ranking(randtree(alg.model.S, 10000))
 SmoothTree.topologize(S)
