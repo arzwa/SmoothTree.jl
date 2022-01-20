@@ -81,6 +81,22 @@ using StatsBase, Distributions
         end
     end
 
+    @testset "marginal p of subset tree" begin
+        leaves = collect(values(ccd.lmap))[[1,2,3,5,7]]
+        treec = countmap(trees)
+        ts = typeof(treec)()
+        for (x, c) in treec
+            st = NewickTree.extract(x, leaves)
+            haskey(ts, st) ? ts[st] += c : ts[st] = c
+        end
+        submap = SmoothTree.BiMap(Dict(k=>v for (k,v) in ccd.lmap if v ∈ leaves))
+        subccd = CCD(ts, lmap=submap)
+        x = randsplits(subccd)
+        logpdf(subccd, x)
+        SmoothTree.marginallogpdf(ccd, x)
+
+    end
+
     @testset "BranchModel algebra" begin
         q1 = BranchModel(UInt16, [1., -1.])
         q2 = BranchModel(UInt16, [2., -4.])

@@ -53,8 +53,14 @@ function Base.show(io::IO, m::BiMap{T,V}) where {T,V}
 end
 
 # a taxonmap
-taxonmap(pair::Pair, T=UInt16) = taxonmap(first(pair), T)
 taxonmap(tree::Node{T}) where T = taxonmap(name.(getleaves(tree)), T)
+taxonmap(tree, T) = taxonmap(name.(getleaves(tree)), T)
+taxonmap(trees::AbstractDict) = taxonmap(collect(keys(trees)))
+taxonmap(trees::Vector{<:Node{T}}) where T = taxonmap(trees, T)
+
+function taxonmap(trees::Vector{<:Node}, T)
+    taxonmap(unique(mapreduce(x->name.(getleaves(x)), vcat, trees)), T)
+end
 
 function taxonmap(l::Vector{String}, T=UInt16)
     d = Dict(T(2^i)=>l[i+1] for i=0:length(l)-1)
@@ -217,5 +223,15 @@ function getclades(tree)
     return clades
 end
 
+# compatibility
+⊂(δ::T, γ::T) where T<:Integer = 
+    δ < γ && cladesize(γ) == cladesize(δ) + cladesize(γ-δ)
+
+#function ⊂(δ::T, γ::T) where T<:Integer 
+#    δ > γ && return false
+#    a = digits(γ, base=2)
+#    b = digits(δ, base=2)
+#    all(a[1:length(b)] .- b .>= 0)
+#end
 
 

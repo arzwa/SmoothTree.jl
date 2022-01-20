@@ -17,9 +17,6 @@ end
 
 Base.show(io::IO, m::MSCModel) = write(io, "$(typeof(m))")
 
-# initialize a MSCModel
-MSCModel(x::NatMBM, θprior, m) = MSCModel(x, BranchModel(x, θprior), m)
-
 # linear operations
 Base.:+(x::MSCModel, y::MSCModel) = MSCModel(x.S + y.S, x.q + y.q, x.m)
 Base.:-(x::MSCModel, y::MSCModel) = MSCModel(x.S - y.S, x.q - y.q, x.m)

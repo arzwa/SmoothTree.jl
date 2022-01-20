@@ -87,7 +87,7 @@ CCD(trees::AbstractDict; kwargs...) = CCD(collect(trees); kwargs...)
 CCD(tree::Node; kwargs...) = CCD([tree]; kwargs...)
 
 # from a vector of (pairs of) trees
-function CCD(trees; lmap=taxonmap(trees[1], UInt16))
+function CCD(trees; lmap=taxonmap(trees[1]))
     ccd = initccd(lmap)
     for tree in trees
         addtree!(ccd, tree)
@@ -257,5 +257,13 @@ end
 # γ is the clade in the CCD, c the clade in the data, d the split
 # under consideration
 function _marginal(ccd, γ, splits, c, d)
-    
+    p = 0.
+    for δ in keys(ccd.smap[γ])
+        q = 0.
+        if c ⊂ δ
+        elseif c ⊂ (γ - δ)
+        end
+    end
+    return p
 end
+

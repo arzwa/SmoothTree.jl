@@ -17,5 +17,21 @@ include("branchmodel.jl")
 include("mscmodel.jl")
 include("epabc.jl")
 
+# this function sets up the main style of analysis
+# note that h is the smoothing parameter for the input data
+function epabc(data, tmap; β=-1.5, h=0., μ=1., V=5., kwargs...)
+    T = keytype(tmap)
+    ntax = length(tmap)
+    root = T(sum(keys(tmap)))
+    bsd  = BetaSplitTree(β, ntax)
+    if h > 0.
+        data = MomMBM.(data, Ref(bsd), h)
+    end
+    Sprior = NatMBM(root, bsd)
+    θprior = BranchModel(T, gaussian_mom2nat([log(μ), V]))
+    model = MSCModel(Sprior, θprior, tmap)
+    alg = EPABC(data, model; kwargs...)
+end
+
 end # module
 
