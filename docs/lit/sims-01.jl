@@ -23,8 +23,8 @@ end
 
 T = UInt16
 #S = nw"(((A,B),C),(D,E));"
-#S = nw"(((((A,B),C),(D,E)),(F,(G,H))),(I,J));"
-S = nw"(((((((((A,B),C),(D,E)),(F,(G,H))),I),(J,K)),L),M),(O,P));"
+S = nw"(((((A,B),C),(D,E)),(F,(G,H))),(I,J));"
+#S = nw"(((((((((A,B),C),(D,E)),(F,(G,H))),I),(J,K)),L),M),(O,P));"
 #T = UInt64
 #S = readnw("(((((((((((A,B),C),(D,E)),(F,(G,H))),I),(J,K)),L),M),(O,P)),Q),((R,S),T));", T)
 #S = readnw(readline("docs/data/mammals-song/mltrees.nw"))
@@ -43,28 +43,13 @@ N = 100
 G = randtree(M, m, N)
 ranking(G) .|> last
 
-#Sprior = NatBMP(CCD(G, lmap=m, α=10.))
-#Sprior = NatBMP(CCD(G, lmap=m, α=1.))
-#Sprior = NatBMP(CCD(G, lmap=m, α=1e-4))
-#Sprior = NatBMP(CCD(unique(G), α=0.1))
-#smple  = ranking(randtree(MomBMP(Sprior), 10000))
-root = T(2^ntaxa - 1)
-bsd  = BetaSplitTree(-1.5, cladesize(root))
-Sprior = NatMBM(root, bsd)
-priormean = 1.
-priorvar  = 2.
-θprior = BranchModel(T, SmoothTree.gaussian_mom2nat([log(priormean), priorvar]))
-
-data  = MomMBM.(CCD.(G, lmap=m), Ref(bsd), 1/2^(ntaxa-1))
-model = MSCModel(Sprior, θprior, m)
-alg   = EPABC(data, model, λ=0.1, α=1/2^(ntaxa-1), prunetol=1e-6,
-              minacc=50, target=100)
+data  = CCD.(G, lmap=m)
+h = 1/2^(ntaxa-1)
+alg = SmoothTree.epabc(data, m, β=-1., λ=0.1, α=h, h=h, minacc=10, target=100)
 
 # EP
 trace = pep!(alg, 1)
-
 trace = ep!(alg, 2)
-
 
 smple = ranking(randtree(alg.model.S, 10000))
 SmoothTree.topologize(S)
