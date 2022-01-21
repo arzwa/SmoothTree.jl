@@ -81,13 +81,13 @@ uweights(xs) = fill(1/length(xs), length(xs))
 
 # Constructors
 # from a countmap
-CCD(trees::AbstractDict; kwargs...) = CCD(collect(trees); kwargs...)
+CCD(trees::AbstractDict, args...) = CCD(collect(trees), args...)
 
 # For a single tree
-CCD(tree::Node; kwargs...) = CCD([tree]; kwargs...)
+CCD(tree::Node, args...) = CCD([tree], args...)
 
 # from a vector of (pairs of) trees
-function CCD(trees; lmap=taxonmap(trees[1]))
+function CCD(trees, lmap)
     ccd = initccd(lmap)
     for tree in trees
         addtree!(ccd, tree)
