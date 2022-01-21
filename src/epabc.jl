@@ -159,7 +159,7 @@ end
 """
     traceback
 """
-function traceback(trace)
+function traceback(trace; sigdigits=3)
     clades = keys(trace[end].S.smap)
     splits = Dict(γ=>collect(keys(trace[end].S.smap[γ].splits)) for γ in clades)
     qclade = keys(trace[end].q.cmap)
@@ -177,7 +177,8 @@ function traceback(trace)
             push!(θtrace[γ], y)
         end
     end
-    c = Dict(γ=>permutedims(hcat(reverse(xs)...)) for (γ, xs) in traces)
-    θ = Dict(γ=>permutedims(hcat(reverse(xs)...)) for (γ, xs) in θtrace)
+    f(x) = round.(permutedims(hcat(reverse(x)...)), sigdigits=sigdigits)
+    c = Dict(γ=>f(xs) for (γ, xs) in traces)
+    θ = Dict(γ=>f(xs) for (γ, xs) in θtrace)
     return c, θ
 end

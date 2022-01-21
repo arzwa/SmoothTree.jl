@@ -1,53 +1,46 @@
 using Pkg; Pkg.activate(@__DIR__)
-using SmoothTree, Test, NewickTree
-using StatsBase, Distributions, Plots
-using Serialization
-default(gridstyle=:dot, legend=false, framestyle=:box, title_loc=:left, titlefont=7)
+using SmoothTree, NewickTree, StatsBase, ThreadTools, JSON
 
+# load all the data (unsummarized)
+# this takes a while
 fnames = readdir("docs/data/mammals-song/424genes.ufboot", join=true)
-boots = map(fnames) do fpath
-    @info fpath
+function tfun(fpath) 
     ts = readnw.(readlines(fpath))
     ts = SmoothTree.rootall!(ts, "Gal")
     countmap(ts)
 end
+boots = tmap(tfun, fnames)
 
-boots = SmoothTree.readtrees("docs/data/mammals-song/424genes-ufboot.trees")
+# load summarized data
+# this also takes a while...
+#boots = SmoothTree.readtrees("docs/data/mammals-song/424genes-ufboot.trees")
 
+# load ML trees
 trees = readnw.(readlines("docs/data/mammals-song/mltrees.nw"))
-tmap = taxonmap(first(trees), UInt64)
-collect(keys(tmap)) |> sort .|> bitstring
 
-data = CCD.(boots, lmap=tmap, α=1e-11)
+# get the taxon map
+taxa = taxonmap(trees, UInt64)
+ntaxa = length(taxa)
 
-Sprior = NatBMP(CCD(trees, lmap=tmap, α=1e-20))
-#Sprior = NatBMP(data[1])
-smple  = ranking(randtree(MomBMP(Sprior), 10000))
-θprior = [SmoothTree.gaussian_mom2nat(log(1.), 5.)...]
+# get the CCDs
+data = CCD.(boots, Ref(taxa))
 
-model = MSCModel(Sprior, θprior, tmap)
-alg   = EPABC(data[1:100], model, λ=0.1, α=1e-20)
+# prior settings
+Sprior = NatMBM(CCD(unique(trees), taxa), BetaSplitTree(-1., ntaxa), 100.)
+θprior = BranchModel(UInt64, gaussian_mom2nat([log(1.), 2.]))
+model  = MSCModel(Sprior, θprior, taxa)
 
-trace = SmoothTree.ep_iteration!(alg, 1, maxn=1e4, mina=10, target=50, adhoc=true)
+# set up the algorithm
+alg   = EPABC(data[1:10], model, λ=0.1, α=1/2^(ntaxa-1), minacc=20,
+              target=100, prunetol=1e-6)
 
-trace = SmoothTree.ep!(alg, 1, maxn=1e4, mina=10, target=50, adhoc=true)
+# run it
+trace = pep!(alg, 1)
+trace = ep!(alg, 3)
+SmoothTree.tuneoff!(alg)
+trace = [trace ; ep!(alg, 3)]
 
-# it does seem to lead somewhere, two passes on the first 10 loci give
-# 15% posterior mass to
-# ((((Mac,Mon),((((((((New,((Gor,(Hom,Pan)),Pon)),Cal),(Oto,Mic)),(Tup,Tar)),((((Spe,(Mus,Rat)),Dip),Cav),(Ory,Och))),(Sor,(((Myo,Pte),((((Tur,Bos),Vic),Sus),((Fel,Can),Eri))),Equ))),((Lox,Pro),Ech)),(Das,Cho))),Orn),Gal);
-# which is not likely the correct tree, but not too far...
-# if we find a good way to modify the kernel, it should work.
-
-X, Y = traceback(trace)
-
-xs = filter(x->size(x[2], 2) > 1, collect(X))
-map(xs[1:32]) do (k, x)
-    p1 = plot(x, title="clade $(bitstring(k)[end-7:end])")
-    p2 = plot(Y[k])
-    plot(p1, p2)
-end |> x-> plot(x..., size=(1200,500))
-
-smplepost = SmoothTree.ranking(randtree(SmoothTree.MomBMP(trace[end].S), 10000))
-
-SmoothTree.relabel(last(smplepost)[1], tmap)
-
+# save trace
+open("epabc-trace.json", "w") do io
+    JSON.print(traceback(trace))
+end

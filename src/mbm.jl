@@ -173,9 +173,15 @@ function prune!(x::M, atol) where {T,V,M<:AbstractMBM{T,V}}
     clades = Set(x.root)
     for (γ, x) in x.smap
         prune!(x, atol)
+        # all splits with non-negligible probabilities are to be kept
+        # note that we also need to keep the complements, which are
+        # not in the split distribution of γ but may have their own
+        # split distribution in the smap!
         union!(clades, keys(x.splits))
+        union!(clades, γ .- keys(x.splits))  
     end
-    toprune = setdiff(keys(x.smap), clades)
+    # those clades nowhere seen will be deleted
+    toprune = setdiff(keys(x.smap), clades)  
     for γ in toprune
         delete!(x.smap, γ)
     end

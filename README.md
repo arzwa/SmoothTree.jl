@@ -6,7 +6,7 @@ This library implements
   This is a distribution over cladograms (labeled phylogenetic trees
   without meaningful branch lengths) derived from a collection of
   observed trees `X` under the assumption of conditional independence
-  of dijoint subtrees. It is the maximum entropy distribution over
+  of disjoint subtrees. It is the maximum entropy distribution over
   tree topologies subject to the constraint of matching observed
   marginal split frequencies in `X`.
 - Aldous' **beta-splitting distribution** over cladograms
@@ -18,7 +18,7 @@ This library implements
   collection of splits (represented by a CCD). This can be seen as a
   smoothed CCD, which spans the whole tree space (the CCD does not
   generally cover the whole tree space)
-- Efficient simulation routines for teh multi-species coalescent
+- Efficient simulation routines for the multi-species coalescent (MSC)
   model.
 - A likelihood-free expectation propagation algorithm for approximate
   Bayesian inference of species trees from gene tree distributions.

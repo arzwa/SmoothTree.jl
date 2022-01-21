@@ -21,13 +21,14 @@ end
 # Note, if one assumes θ ~ Gamma(α, 1/β), then E[exp(-θ)] = (1+1/β)^-k
 # (from the mgf), which is approximately exp(-E[θ])
 
-#T = UInt16
+T = UInt16
 #S = nw"(((A,B),C),(D,E));"
 #S = nw"(((((A,B),C),(D,E)),F),G);"
-#S = nw"(((((A,B),C),(D,E)),(F,(G,H))),(I,J));"
+#S = nw"((((A,B),C),(D,E)),((F,G),H));"
+S = nw"(((((A,B),C),(D,E)),(F,(G,H))),(I,J));"
 #S = nw"(((((((((A,B),C),(D,E)),(F,(G,H))),I),(J,K)),L),M),(O,P));"
-T = UInt64
-S = readnw("(((((((((((A,B),C),(D,E)),(F,(G,H))),I),(J,K)),L),M),(O,P)),Q),((R,S),T));", T)
+#T = UInt64
+#S = readnw("(((((((((((A,B),C),(D,E)),(F,(G,H))),I),(J,K)),L),M),(O,P)),Q),((R,S),T));", T)
 #S = readnw(readline("docs/data/mammals-song/mltrees.nw"))
 #T = UInt64
 #S = readnw(nwstr(S[1][1][2][1]), T)
@@ -43,7 +44,7 @@ N = 200
 G = randtree(M, m, N)
 ranking(G) .|> last
 
-μ, V = 1., 1.
+μ, V = 1., 2.
 h = 1/2^(ntaxa-1)
 bsd = BetaSplitTree(-1., ntaxa)
 data = CCD.(G, Ref(m))
@@ -77,7 +78,7 @@ clades = filter(n->!SmoothTree.isleafclade(n), id.(postwalk(mapS)))[1:end-1]
 pls = map(clades) do g
     plot(Normal(log(μ), √V), color=:lightgray,
          fill=true, fillalpha=0.8, xlim=(-4.5,4.5), yticks=false, grid=false)
-    for model in trace[1:20:end]
+    for model in trace[1:50:end]
         lm, VV = SmoothTree.gaussian_nat2mom(model.q[g])
         plot!(Normal(lm, √VV), color=:black)
     end
