@@ -82,6 +82,7 @@ end
 # a random split for a SparseSplits split distribution
 # Assumes moment parameter!
 function randsplit(x::SparseSplits)
+    length(x.splits) == 0 && return _priorsplit(x)
     splitps = collect(x.splits)
     weights = last.(splitps)
     splits  = first.(splitps)
@@ -91,9 +92,13 @@ function randsplit(x::SparseSplits)
         i = sample(1:length(pr), Weights(pr))
         return splits[i]
     else 
-        k = sample(1:length(x.n), Weights(x.η0 .* x.n))
-        return randsplitofsize(x.γ, k)
+        return _priorsplit(x)
     end
+end
+
+function _priorsplit(x::SparseSplits)
+    k = sample(1:length(x.n), Weights(x.η0 .* x.n))
+    return randsplitofsize(x.γ, k)
 end
 
 # Define linear operations

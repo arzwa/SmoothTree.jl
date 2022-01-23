@@ -13,7 +13,7 @@ include("ccd.jl")
 include("msc.jl")
 include("sparsesplits.jl")
 include("mbm.jl")
-include("branchmodel.jl")
+include("splitbranchmodel.jl")
 include("mscmodel.jl")
 include("epabc.jl")
 

@@ -11,7 +11,9 @@ function getcladeθ(S, m)
         isleaf(n) && return m[name(n)]
         a = walk(n[1])
         b = walk(n[2])
-        d[a+b] = distance(n)
+        c = a+b
+        d[(c, a)] = distance(n[1])
+        d[(c, b)] = distance(n[2])
         return a+b
     end
     walk(S)
@@ -25,8 +27,8 @@ T = UInt16
 #S = nw"(((A,B),C),(D,E));"
 #S = nw"(((((A,B),C),(D,E)),F),G);"
 #S = nw"((((A,B),C),(D,E)),((F,G),H));"
-S = nw"(((((A,B),C),(D,E)),(F,(G,H))),(I,J));"
-#S = nw"(((((((((A,B),C),(D,E)),(F,(G,H))),I),(J,K)),L),M),(O,P));"
+#S = nw"(((((A,B),C),(D,E)),(F,(G,H))),(I,J));"
+S = nw"(((((((((A,B),C),(D,E)),(F,(G,H))),I),(J,K)),L),M),(O,P));"
 #T = UInt64
 #S = readnw("(((((((((((A,B),C),(D,E)),(F,(G,H))),I),(J,K)),L),M),(O,P)),Q),((R,S),T));", T)
 #S = readnw(readline("docs/data/mammals-song/mltrees.nw"))
@@ -40,7 +42,7 @@ SmoothTree.setdistance_internal!(S, θ)
 m = taxonmap(S, T)
 d = getcladeθ(S, m)
 M = SmoothTree.MSC(S, m)
-N = 200
+N = 100
 G = randtree(M, m, N)
 ranking(G) .|> last
 
@@ -50,13 +52,16 @@ bsd = BetaSplitTree(-1., ntaxa)
 data = CCD.(G, Ref(m))
 data = MomMBM.(data, Ref(bsd), h)
 Sprior = NatMBM(CCD(unique(G), m), bsd, 10.)
-θprior = BranchModel(T, gaussian_mom2nat([log(μ), V]))
+#Sprior = NatMBM(T(sum(keys(m))), bsd)
+θprior = BranchModel(Tuple{T,T}, gaussian_mom2nat([log(μ), V]))
 model = MSCModel(Sprior, θprior, m)
-alg = EPABC(data, model, prunetol=1e-6, λ=0.1, α=h, target=200, minacc=50)
+alg = EPABC(data, model, prunetol=1e-4, λ=0.1, α=h, target=200, minacc=10)
 
 # EP
 trace = pep!(alg, 1)
-trace = ep!(alg, 2)
+trace = ep!(alg, 3)
+
+# XXX somehow the length for the branch leading to ABC is not recorded
 
 smple = ranking(randtree(alg.model.S, 10000))
 SmoothTree.topologize(S)
@@ -74,12 +79,13 @@ X1, X2 = traceback(trace)
 
 # log scale
 mapS = first(smple)[1]
-clades = filter(n->!SmoothTree.isleafclade(n), id.(postwalk(mapS)))[1:end-1]
+nodes = filter(n->!isleaf(n) && !isroot(n), postwalk(mapS))
+clades = map(n->(id(parent(n)), id(n)), nodes) 
 pls = map(clades) do g
     plot(Normal(log(μ), √V), color=:lightgray,
          fill=true, fillalpha=0.8, xlim=(-4.5,4.5), yticks=false, grid=false)
     for model in trace[1:50:end]
-        lm, VV = SmoothTree.gaussian_nat2mom(model.q[g])
+        lm, VV = SmoothTree.gaussian_nat2mom(alg.model.q[g])
         plot!(Normal(lm, √VV), color=:black)
     end
     vline!([log(d[g])], color=:black, ls=:dot)

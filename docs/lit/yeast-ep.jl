@@ -9,7 +9,7 @@ trees = readnw.(readlines("docs/data/yeast.mltrees"))
 tmap = SmoothTree.taxonmap(trees, UInt16)
 
 # we can compare using ML gene trees against acknowledging uncertainty
-data  = CCD.(data_, lmap=tmap)  
+data  = CCD.(data_, Ref(tmap))
 #data  = CCD.(trees, lmap=tmap)
 alg = SmoothTree.epabc(data, tmap, β=-1.5, h=0.01, V=2.)
 

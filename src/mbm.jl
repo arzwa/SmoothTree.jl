@@ -104,7 +104,7 @@ randtree(model::NatMBM, n) = randtree(MomMBM(model), n)
 # recursion for randtree
 function _randwalk(node, model::MomMBM)
     clade = id(node)
-    isleafclade(clade) && return
+    isleafclade(clade) && return node
     splt = randsplit(model, clade)
     n1 = Node(splt, node)
     n2 = Node(clade - splt, node)

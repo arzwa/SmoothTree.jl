@@ -9,9 +9,9 @@ multispecies coalescent model. Note that:
   Gaussians, one for each *clade*, i.e. representing the parameter for
   the branch leading to that clade as a crown group.
 """
-struct MSCModel{T,V,W}
+struct MSCModel{T,V,U,W}
     S::NatMBM{T,V}       # species tree distribution approximation
-    q::BranchModel{T,W}  # branch parameter distribution approximation
+    q::BranchModel{U,W}  # branch parameter distribution approximation
     m::BiMap{T,String}   # species label to clade map
 end
 
@@ -25,9 +25,9 @@ Base.:*(a, x::MSCModel) = MSCModel(x.S * a, x.q * a, x.m)
 
 # In the EP algorithm we sample a lot of species trees, using the
 # moment-space MBM
-struct MSCSampler{T,V,W}
+struct MSCSampler{T,V,U,W}
     S::MomMBM{T,V}
-    q::BranchModel{T,W}
+    q::BranchModel{U,W}
 end
 
 MSCSampler(m::MSCModel) = MSCSampler(MomMBM(m.S), m.q)
@@ -60,6 +60,7 @@ function matchmoments(trees, cavity::MSCModel{T}, α) where T
     m = shitmap(trees[1], T)  # XXX sucks?
     S = NatMBM(CCD(trees, m), cavity.S.beta, α)#, αroot=0.)) respect rooting?
     q = matchmoments(trees, cavity.q)
+    # XXX we should get the CCD and branch lengths in one pass over `trees`
     return MSCModel(S, q, cavity.m)
 end
 

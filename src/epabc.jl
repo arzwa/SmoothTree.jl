@@ -23,12 +23,12 @@ likelihood free EP) algorithm struct. See `ep!` and `pep!`.
     sites::Vector{M}
     λ::Float64 = 0.1    # for damped update...
     α::Float64 = 1e-16  # Dirichlet-MBM parameter for 'moment matching'
-    minacc = 100
-    target = 500
-    maxsim = 1e5 
-    r = 1.
-    tuner = true
-    prunetol = 0.
+    minacc::Int = 100
+    target::Int = 500
+    maxsim::Int = 1e5 
+    r::Float64 = 1.
+    tuner::Bool = true
+    prunetol::Float64 = 0.
 end
 
 function tuneoff!(alg)
@@ -52,8 +52,7 @@ end
 getcavity(i, m, s) = isassigned(s, i) ? m - s[i] : m
 
 function ep_iteration(alg, i)
-    @unpack data, model, sites, λ, α, r = alg
-    @unpack minacc, target, maxsim, tuner = alg
+    @unpack model, sites, λ, α, minacc, target, maxsim, tuner = alg
     X = alg.data[i]
     cavity = getcavity(i, model, sites)
     smpler = MSCSampler(cavity)
@@ -62,27 +61,36 @@ function ep_iteration(alg, i)
     S = typeof(sptree)
     accsims = Tuple{Float64,S}[]
     allsims = Tuple{Float64,S}[]
+    us = Float64[]
     nacc = n = 0
+    corr = log(alg.r) 
     while true   # this could be parallelized to some extent using blocks
         n += 1
         G = randsplits(MSC(sptree, init))
-        l = logpdf(data[i], G)
-        if log(rand()/r) < l
+        l = logpdf(X, G)
+        u = log(rand())
+        if u - corr < l
             nacc += 1
             push!(accsims, (l, sptree))
         end
+        push!(us, u)  # store the random numbers...
         push!(allsims, (l, sptree))
         (n ≥ maxsim || nacc ≥ target) && break
         sptree = randtree(smpler)
     end
+    r = alg.r
     if tuner # we are tuning r
         ls = first.(allsims)
         Ep = exp(logsumexp(ls))/n  # expected number of accepted simulations
-        r  = nacc < target || r != 1. ? max(1., target / (maxsim * Ep)) : r
+        if nacc < target || r != 1.
+            r = max(1., target / (maxsim * Ep))
+        end
         # if we did not reach the target, the new r is better for the
         # current set of simulations.
         if nacc < target
-            accsims = filter(x->log(rand()/r) < x[1], allsims)
+            us .-= log(r)  # re-use the random numbers but with different `r`
+            ix = filter(i->us[i] < allsims[i][1], 1:length(allsims))
+            accsims = allsims[ix]
             nacc = length(accsims)
         end
     end
