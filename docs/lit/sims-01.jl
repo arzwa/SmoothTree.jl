@@ -23,43 +23,43 @@ end
 # Note, if one assumes θ ~ Gamma(α, 1/β), then E[exp(-θ)] = (1+1/β)^-k
 # (from the mgf), which is approximately exp(-E[θ])
 
-T = UInt16
-#S = nw"(((A,B),C),(D,E));"
-#S = nw"(((((A,B),C),(D,E)),F),G);"
-#S = nw"((((A,B),C),(D,E)),((F,G),H));"
-#S = nw"(((((A,B),C),(D,E)),(F,(G,H))),(I,J));"
-S = nw"(((((((((A,B),C),(D,E)),(F,(G,H))),I),(J,K)),L),M),(O,P));"
-#T = UInt64
-#S = readnw("(((((((((((A,B),C),(D,E)),(F,(G,H))),I),(J,K)),L),M),(O,P)),Q),((R,S),T));", T)
-#S = readnw(readline("docs/data/mammals-song/mltrees.nw"))
-#T = UInt64
-#S = readnw(nwstr(S[1][1][2][1]), T)
-#S = readnw(nwstr(S[1][1][2][1]), T)
-ntaxa = length(getleaves(S))
+# simulate a species tree
+T = UInt64
+ntaxa = 20
+root = rootclade(ntaxa, T) 
+S = randtree(MomMBM(root, BetaSplitTree(-1., ntaxa)))
 l = SmoothTree.n_internal(S)
 θ = rand(Gamma(4., 1/2), l)
 SmoothTree.setdistance_internal!(S, θ)
 m = taxonmap(S, T)
 d = getcladeθ(S, m)
+
+# simulate gene trees
 M = SmoothTree.MSC(S, m)
 N = 100
 G = randtree(M, m, N)
 ranking(G) .|> last
 
 μ, V = 1., 2.
-h = 1/2^(ntaxa-1)
+a = 1/2^(ntaxa-1)
 bsd = BetaSplitTree(-1., ntaxa)
 data = CCD.(G, Ref(m))
-data = MomMBM.(data, Ref(bsd), h)
-Sprior = NatMBM(CCD(unique(G), m), bsd, 10.)
+data = MomMBM.(data, Ref(bsd), a)
+Sprior = NatMBM(CCD(unique(G), m), bsd, 100.)
 #Sprior = NatMBM(T(sum(keys(m))), bsd)
 θprior = BranchModel(Tuple{T,T}, gaussian_mom2nat([log(μ), V]))
 model = MSCModel(Sprior, θprior, m)
-alg = EPABC(data, model, prunetol=1e-4, λ=0.1, α=h, target=200, minacc=10)
+alg = EPABC(data, model, prunetol=1e-4, λ=0.1, α=a, target=200, minacc=10, batch=100)
+
+# MAP tree under the prior
+maprior = ranking(randtree(Sprior, 10000)) .|> last
 
 # EP
 trace = pep!(alg, 1)
 trace = ep!(alg, 3)
+
+SmoothTree.tuneoff!(alg)
+trace = [trace; ep!(alg, 1)]
 
 # XXX somehow the length for the branch leading to ABC is not recorded
 

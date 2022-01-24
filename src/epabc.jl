@@ -26,14 +26,15 @@ likelihood free EP) algorithm struct. See `ep!` and `pep!`.
     minacc::Int = 100
     target::Int = 500
     maxsim::Int = 1e5 
-    r::Float64 = 1.
-    tuner::Bool = true
+    h::Float64 = 1.
+    tuneh::Bool = true
+    batch::Int = 1
     prunetol::Float64 = 0.
 end
 
 function tuneoff!(alg)
-    alg.r = 1.
-    alg.tuner = false
+    alg.h = 1.
+    alg.tuneh = false
 end
 
 function EPABC(data, prior::T; kwargs...) where T
@@ -42,17 +43,11 @@ function EPABC(data, prior::T; kwargs...) where T
     EPABC(data=data, model=prior, sites=sites; kwargs...)
 end
 
-function prune!(alg)
-    alg.prunetol == 0. && return
-    map(site->prune!(site, alg.prunetol), alg.sites)
-    alg.model = reduce(+, alg.sites)
-end
-
 # get the cavity distribution
 getcavity(i, m, s) = isassigned(s, i) ? m - s[i] : m
 
 function ep_iteration(alg, i)
-    @unpack model, sites, λ, α, minacc, target, maxsim, tuner = alg
+    @unpack model, sites, λ, α, minacc, target, maxsim, tuneh = alg
     X = alg.data[i]
     cavity = getcavity(i, model, sites)
     smpler = MSCSampler(cavity)
@@ -63,7 +58,7 @@ function ep_iteration(alg, i)
     allsims = Tuple{Float64,S}[]
     us = Float64[]
     nacc = n = 0
-    corr = log(alg.r) 
+    corr = log(alg.h) 
     while true   # this could be parallelized to some extent using blocks
         n += 1
         G = randsplits(MSC(sptree, init))
@@ -78,17 +73,15 @@ function ep_iteration(alg, i)
         (n ≥ maxsim || nacc ≥ target) && break
         sptree = randtree(smpler)
     end
-    r = alg.r
-    if tuner # we are tuning r
+    h = alg.h
+    if tuneh # we are tuning h
         ls = first.(allsims)
         Ep = exp(logsumexp(ls))/n  # expected number of accepted simulations
-        if nacc < target || r != 1.
-            r = max(1., target / (maxsim * Ep))
-        end
-        # if we did not reach the target, the new r is better for the
-        # current set of simulations.
-        if nacc < target
-            us .-= log(r)  # re-use the random numbers but with different `r`
+        if nacc < target || h != 1.
+            h = max(1., target / (maxsim * Ep))
+            # if we did not reach the target, the new r is better for the
+            # current set of simulations.
+            us .-= log(h)  # re-use the random numbers but with different `r`
             ix = filter(i->us[i] < allsims[i][1], 1:length(allsims))
             accsims = allsims[ix]
             nacc = length(accsims)
@@ -96,7 +89,58 @@ function ep_iteration(alg, i)
     end
     full = nacc < minacc ? # not enough accepted simulations
         model : matchmoments(last.(accsims), cavity, alg.α)
-    return nacc, n, r, full, cavity, accsims
+    return nacc, n, h, full, cavity, accsims
+end
+
+# simulation-parallel iteration
+function pep_iteration(alg, i)
+    @unpack model, sites, λ, α, minacc, target, maxsim, tuneh = alg
+    X = alg.data[i]
+    cavity = getcavity(i, model, sites)
+    smpler = MSCSampler(cavity)
+    sptree = randtree(smpler)
+    init = Dict(id(n)=>[id(n)] for n in getleaves(sptree))
+    S = typeof(sptree)
+    accsims = Tuple{Float64,S}[]
+    allsims = Tuple{Float64,S}[]
+    us = Float64[]
+    nacc = n = 0
+    corr = log(alg.h) 
+    while true
+        # simulate in parallel in batches of size `alg.batch`
+        sims = similar(allsims, alg.batch)
+        Threads.@threads for j=1:alg.batch
+            sptree = randtree(smpler)
+            G = randsplits(MSC(sptree, init))
+            l = logpdf(X, G)
+            sims[j] = (l, sptree)
+        end
+        u = log.(rand(alg.batch))
+        accepted = u .- corr .< first.(sims)
+        accsims = vcat(accsims, sims[accepted])
+        allsims = vcat(allsims, sims)
+        us = vcat(us, u)
+        nacc += sum(accepted)
+        n += alg.batch
+        (n ≥ maxsim || nacc ≥ target) && break
+    end
+    h = alg.h
+    if tuneh # we are tuning h
+        ls = first.(allsims)
+        Ep = exp(logsumexp(ls))/n  # expected number of accepted simulations
+        if nacc < target || h != 1.
+            h = max(1., target / (maxsim * Ep))
+            # if we did not reach the target, the new r is better for the
+            # current set of simulations.
+            us .-= log(h)  # re-use the random numbers but with different `r`
+            ix = filter(i->us[i] < allsims[i][1], 1:length(allsims))
+            accsims = allsims[ix]
+            nacc = length(accsims)
+        end
+    end
+    full = nacc < minacc ? # not enough accepted simulations
+        model : matchmoments(last.(accsims), cavity, alg.α)
+    return nacc, n, h, full, cavity, accsims
 end
 
 """
@@ -124,10 +168,14 @@ function ep_serial!(alg; rnd=true)
     iter = ProgressBar(rnge)
     nacc = n = 0
     trace = map(iter) do i
-        desc = string(@sprintf("%8.3g%4d%4d/%6d", alg.r, i, nacc, n))
+        desc = string(@sprintf("%8.3gh%4d%4d/%6d", alg.h, i, nacc, n))
         set_description(iter, desc)
-        nacc, n, r, full, cavity, _ = ep_iteration(alg, i)
-        alg.r = r
+        if alg.batch == 1
+            nacc, n, h, full, cavity, _ = ep_iteration(alg, i)
+        else
+            nacc, n, h, full, cavity, _ = pep_iteration(alg, i)
+        end 
+        alg.h = h
         update!(alg, full, cavity, i) 
     end 
     prune!(alg)
@@ -143,9 +191,9 @@ function ep_parallel!(alg)
     N = length(alg.data)
     iter = ProgressBar(1:N)
     Threads.@threads for i in iter
-        nacc, n, r, full, cavity, _ = ep_iteration(alg, i)
+        nacc, n, h, full, cavity, _ = ep_iteration(alg, i)
         alg.sites[i] = full - cavity
-        desc = string(@sprintf("%8.3g%4d%4d/%6d", r, i, nacc, n))
+        desc = string(@sprintf("%8.3gh%4d%4d/%6d", h, i, nacc, n))
         set_description(iter, desc)
     end
     alg.sites[1:N] .= map(x->alg.λ*x, alg.sites[1:N])
@@ -157,11 +205,19 @@ end
     
 # not using the cavity...
 function update!(alg, full, cavity, i)
-    @unpack λ = alg
+    @unpack λ, prunetol = alg
     siteup = λ * (full - alg.model)
+    prunetol != 0. && prune!(siteup, prunetol)  # should we?
     alg.sites[i] = isassigned(alg.sites, i) ? 
         alg.sites[i] + siteup : siteup
     alg.model = alg.model + siteup
+end
+
+function prune!(alg)
+    @unpack prunetol, sites = alg
+    prunetol == 0. && return
+    map(i->isassigned(sites, i) && prune!(sites[i], prunetol), 1:length(sites))
+    alg.model = reduce(+, sites)
 end
 
 """
