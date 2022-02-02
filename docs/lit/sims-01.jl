@@ -24,8 +24,8 @@ end
 # (from the mgf), which is approximately exp(-E[θ])
 
 # simulate a species tree
-T = UInt64
-ntaxa = 20
+T = UInt16
+ntaxa = 5
 root = rootclade(ntaxa, T) 
 S = randtree(MomMBM(root, BetaSplitTree(-1., ntaxa)))
 l = SmoothTree.n_internal(S)
@@ -36,27 +36,27 @@ d = getcladeθ(S, m)
 
 # simulate gene trees
 M = SmoothTree.MSC(S, m)
-N = 100
+N = 200
 G = randtree(M, m, N)
 ranking(G) .|> last
 
-μ, V = 1., 2.
+μ, V = 1., 1.
 a = 1/2^(ntaxa-1)
 bsd = BetaSplitTree(-1., ntaxa)
 data = CCD.(G, Ref(m))
 data = MomMBM.(data, Ref(bsd), a)
 Sprior = NatMBM(CCD(unique(G), m), bsd, 100.)
 #Sprior = NatMBM(T(sum(keys(m))), bsd)
-θprior = BranchModel(Tuple{T,T}, gaussian_mom2nat([log(μ), V]))
+θprior = BranchModel(root, gaussian_mom2nat([log(μ), V]))
 model = MSCModel(Sprior, θprior, m)
-alg = EPABC(data, model, prunetol=1e-4, λ=0.1, α=a, target=200, minacc=10, batch=100)
+alg = EPABC(data, model, prunetol=1e-5, λ=0.1, α=a, target=500, minacc=10, batch=500)
 
 # MAP tree under the prior
 maprior = ranking(randtree(Sprior, 10000)) .|> last
 
 # EP
-trace = pep!(alg, 1)
-trace = ep!(alg, 3)
+#trace = pep!(alg, 1)
+trace = ep!(alg, 2)
 
 SmoothTree.tuneoff!(alg)
 trace = [trace; ep!(alg, 1)]
@@ -82,16 +82,21 @@ mapS = first(smple)[1]
 nodes = filter(n->!isleaf(n) && !isroot(n), postwalk(mapS))
 clades = map(n->(id(parent(n)), id(n)), nodes) 
 pls = map(clades) do g
-    plot(Normal(log(μ), √V), color=:lightgray,
+    p = plot(Normal(log(μ), √V), color=:lightgray,
          fill=true, fillalpha=0.8, xlim=(-4.5,4.5), yticks=false, grid=false)
-    for model in trace[1:50:end]
-        lm, VV = SmoothTree.gaussian_nat2mom(alg.model.q[g])
+    for model in trace[1:100:end]
+        lm, VV = SmoothTree.gaussian_nat2mom(model.q[g])
         plot!(Normal(lm, √VV), color=:black)
     end
-    vline!([log(d[g])], color=:black, ls=:dot)
+    try
+        vline!([log(d[g])], color=:black, ls=:dot)
+    catch
+        @warn "incorrect phylogeny!"
+    end
+    p
 end 
 #xlabel!(pls[13], L"\theta")
-plot(pls...) #,layout=(3,5), size=(600,300))
+plot(pls..., layout=(3,6)) #,layout=(3,5), size=(600,300))
 #plot(p, bottom_margin=1.5mm)
 #savefig("docs/img/17taxa-posterior.pdf")
 

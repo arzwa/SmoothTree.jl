@@ -79,3 +79,11 @@ function prune!(model::MSCModel, atol=1e-9)
     prune!(model.S, atol)
     prune!(model.q, atol)
 end
+
+"""
+    logpartition(model::MSCModel)
+
+Compute the logpartition function of the MSCModel.
+"""
+logpartition(model::MSCModel) = logpartition(model.S) + logpartition(model.q)
+

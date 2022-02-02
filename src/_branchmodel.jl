@@ -1,6 +1,3 @@
-# There seems to be no good reason why we define the branch model at the clade
-# level and not the split level...
-
 """
     BranchModel{T,V}
 
@@ -11,7 +8,7 @@ the latter will be the prior. For an individual site `η0` will be
 zero.
 """
 struct BranchModel{T,V}
-    cmap ::Dict{T,Vector{V}}  # (clade, split) => natural parameter 
+    cmap ::Dict{T,Vector{V}}  # clade => natural parameter 
     η0   ::Vector{V}          # natural parameter for unrepresented clade
 end
 
@@ -74,21 +71,14 @@ end
 # recursively process a tree to get the sufficient statistics for
 # branch parameters
 function _record_branchparams!(d, node)
-    isleaf(node) && return id(node), log(distance(node))
-    left, dl = _record_branchparams!(d, node[1]) 
-    rght, dr = _record_branchparams!(d, node[2]) 
+    isleaf(node) && return id(node)
+    left = _record_branchparams!(d, node[1]) 
+    rght = _record_branchparams!(d, node[2]) 
     clade = left + rght
-    if isfinite(dl)
-        k = (clade, left)
-        !haskey(d, k) && (d[k] = zeros(3))
-        d[k] .+= [1., dl, dl^2]
-    end
-    if isfinite(dr)
-        k = (clade, rght)
-        !haskey(d, k) && (d[k] = zeros(3))
-        d[k] .+= [1., dr, dr^2]
-    end
-    return clade, log(distance(node))
+    x = log(node.data.distance)
+    !haskey(d, clade) && (d[clade] = zeros(3))
+    d[clade] .+= [1., x, x^2]
+    return clade
 end
 
 # add the cavity (pseudo-prior) contribution to the moment estimates
@@ -112,24 +102,18 @@ function _mom2nat(xs, xsqs, N)
 end
 
 # draw random branch lengths for a given tree according to a BranchModel
-# XXX currently assumes tip branches have no meaningful branch length
 function _randbranches!(node, q::BranchModel)
-    if isleaf(node) 
-        node.data.distance = Inf
-        return id(node), true
+    if isleaf(node)
+        node.data.distance == Inf
+        return id(node)
+    else
+        left = _randbranches!(node[1], q)
+        rght = _randbranches!(node[2], q)
+        clade = left + rght
+        η = q[clade]
+        node.data.distance = exp(randgaussian_nat(η[1], η[2]))
+        return clade
     end
-    left, ll = _randbranches!(node[1], q)
-    rght, lr = _randbranches!(node[2], q)
-    clade = left + rght
-    if !ll  # left is not a leaf node
-        η = q[(clade, left)]
-        node[1].data.distance = exp(randgaussian_nat(η[1], η[2]))
-    end
-    if !lr  # right is not a leaf node
-        η = q[(clade, rght)]
-        node[2].data.distance = exp(randgaussian_nat(η[1], η[2]))
-    end
-    return clade, false
 end
 
 """

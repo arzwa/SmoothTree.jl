@@ -187,4 +187,38 @@ function prune!(x::M, atol) where {T,V,M<:AbstractMBM{T,V}}
     end
 end
 
+function allsplits(x::AbstractMBM)
+    map(collect(x.smap)) do (γ, splits)
+        map(x->(γ,x), collect(keys(splits.splits)))
+    end |> x->reduce(vcat, x)
+end
+
+"""
+    logpartition(x::AbstractMBM)
+
+Compute the log-partition function for `x`.
+
+The log-partition function of a categorical distribution on k categories with
+moment parameter `θ = (θ1, θ2, …, θ{k-1})` is `-log(1-∑i θi) = -log θk`. The
+MBM defines a categorical distribution on tree topologies. We have defined an
+order on trees (in particular we have a well-defined last tree, see `reftree`).
+So it appears we can easily compute -log θk. 
+"""
+logpartition(x::NatMBM) = -logpdf(MomMBM(x), reftree(x.root)) 
+logpartition(x::MomMBM) = -logpdf(x, reftree(x.root)) 
+
+# get the last tree in the induced tree order
+function reftree(x::T) where T
+    splits = Tuple{T,T}[]
+    function walk(x)
+        isleafclade(x) && return 
+        a = refsplit(x)
+        b = x - a
+        push!(splits, (x, a))
+        walk(a)
+        walk(b)
+    end
+    walk(x)
+    return splits
+end
 

@@ -94,11 +94,12 @@ pp = Dict(t=>p for (t,p) in zip(trees, pp))
 ppdf = postpdf(G, trees, m, prior)
 
 # EP
+T = UInt16
 bsd    = BetaSplitTree(-1.5, 3)
-Sprior = NatMBM(UInt16(7), bsd)
+Sprior = NatMBM(T(7), bsd)
 θprior = SmoothTree.gaussian_mom2nat([log(1.), 5.])
-q      = BranchModel(UInt16, θprior )
-data   = CCD.(Y, lmap=m)
+q      = BranchModel(Tuple{T,T}, θprior )
+data   = CCD.(Y, Ref(m))
 model  = MSCModel(Sprior, q, m)
 alg    = EPABC(data, model, λ=0.1, α=1e-9, maxsim=1e5, target=500, minacc=100)
 
@@ -114,10 +115,11 @@ M = SmoothTree.MSC(S, Dict(id(n)=>[id(n)] for n in getleaves(S)))
 pps = combine(map(_->proportionmap(randtree(M, m, N)), 1:1000))
 obs = proportionmap(Y)
 
-p1 = plot(B[0x0003], label=[L"\log \mu" L"\sigma^2"],
+c = (0x0007, 0x0003)
+p1 = plot(B[c], label=[L"\log \mu" L"\sigma^2"],
           xlabel=L"n", color=:black, ls=[:solid :dash], title="(A)")
 hline!(p1, [log(θ)], ls=:dot, color=:black, label="")
-μ, V = B[0x0003][end,:]
+μ, V = B[c][end,:]
 p2 = plot(prior, color=:lightgray, fill=true, size=(300,200),
           xlabel=L"\theta", label=L"p(\theta)", title="(B)",
           xlim=(-2.5,2.5), alpha=0.5)

@@ -14,9 +14,10 @@ include("ccd.jl")
 include("msc.jl")
 include("sparsesplits.jl")
 include("mbm.jl")
-include("splitbranchmodel.jl")
+include("branchmodel.jl")
 include("mscmodel.jl")
 include("epabc.jl")
+include("pps.jl")
 
 # this function sets up the main style of analysis
 # note that h is the smoothing parameter for the input data
