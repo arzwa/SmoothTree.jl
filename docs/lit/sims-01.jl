@@ -24,8 +24,8 @@ end
 # (from the mgf), which is approximately exp(-E[θ])
 
 # simulate a species tree
-T = UInt16
-ntaxa = 5
+T = UInt32
+ntaxa = 20
 root = rootclade(ntaxa, T) 
 S = randtree(MomMBM(root, BetaSplitTree(-1., ntaxa)))
 l = SmoothTree.n_internal(S)
@@ -36,7 +36,7 @@ d = getcladeθ(S, m)
 
 # simulate gene trees
 M = SmoothTree.MSC(S, m)
-N = 200
+N = 100
 G = randtree(M, m, N)
 ranking(G) .|> last
 
@@ -45,7 +45,7 @@ a = 1/2^(ntaxa-1)
 bsd = BetaSplitTree(-1., ntaxa)
 data = CCD.(G, Ref(m))
 data = MomMBM.(data, Ref(bsd), a)
-Sprior = NatMBM(CCD(unique(G), m), bsd, 100.)
+Sprior = NatMBM(CCD(unique(G), m), bsd, 10.)
 #Sprior = NatMBM(T(sum(keys(m))), bsd)
 θprior = BranchModel(root, gaussian_mom2nat([log(μ), V]))
 model = MSCModel(Sprior, θprior, m)
@@ -59,7 +59,7 @@ maprior = ranking(randtree(Sprior, 10000)) .|> last
 trace = ep!(alg, 2)
 
 SmoothTree.tuneoff!(alg)
-trace = [trace; ep!(alg, 1)]
+trace = [trace; ep!(alg, 2)]
 
 # XXX somehow the length for the branch leading to ABC is not recorded
 
@@ -84,7 +84,7 @@ clades = map(n->(id(parent(n)), id(n)), nodes)
 pls = map(clades) do g
     p = plot(Normal(log(μ), √V), color=:lightgray,
          fill=true, fillalpha=0.8, xlim=(-4.5,4.5), yticks=false, grid=false)
-    for model in trace[1:100:end]
+    for model in first.(trace[1:100:end])
         lm, VV = SmoothTree.gaussian_nat2mom(model.q[g])
         plot!(Normal(lm, √VV), color=:black)
     end

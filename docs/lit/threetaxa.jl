@@ -45,7 +45,8 @@ end
 
 function loglhood(tree, m, G)
     p = triple_p(tree, m)
-    logpdf(Multinomial(sum(G), p), G)
+    #logpdf(Multinomial(sum(G), p), G)
+    sum(log.(p .^ G))
 end
 
 function setθ!(tree, θ)
@@ -93,12 +94,14 @@ pp = ls ./ sum(ls)
 pp = Dict(t=>p for (t,p) in zip(trees, pp))
 ppdf = postpdf(G, trees, m, prior)
 
+ev = log(sum((1/3) .* ls))
+
 # EP
-T = UInt16
+root = UInt16(7)
 bsd    = BetaSplitTree(-1.5, 3)
-Sprior = NatMBM(T(7), bsd)
+Sprior = NatMBM(root, bsd)
 θprior = SmoothTree.gaussian_mom2nat([log(1.), 5.])
-q      = BranchModel(Tuple{T,T}, θprior )
+q      = BranchModel(root, θprior )
 data   = CCD.(Y, Ref(m))
 model  = MSCModel(Sprior, q, m)
 alg    = EPABC(data, model, λ=0.1, α=1e-9, maxsim=1e5, target=500, minacc=100)
@@ -109,11 +112,15 @@ relabel(first(smple)[1], m)
 
 combine(xs::Vector{<:Dict}) = Dict(k=>[x[k] for x in xs] for k in keys(xs[1]))
 
-A, B = traceback(trace)
-S = SmoothTree.randtree(trace[end])
+A, B = traceback(first.(trace))
+S = SmoothTree.randtree(trace[end][1])
 M = SmoothTree.MSC(S, Dict(id(n)=>[id(n)] for n in getleaves(S)))
 pps = combine(map(_->proportionmap(randtree(M, m, N)), 1:1000))
 obs = proportionmap(Y)
+
+@info ev, SmoothTree.evidence(alg)
+plot(last.(trace))
+hline!([ev])
 
 c = (0x0007, 0x0003)
 p1 = plot(B[c], label=[L"\log \mu" L"\sigma^2"],

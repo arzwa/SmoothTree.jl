@@ -32,6 +32,8 @@ end
 
 MSCSampler(m::MSCModel) = MSCSampler(MomMBM(m.S), m.q)
 
+Base.eltype(m::MSCSampler{T,V,U,W}) where {T,V,U,W} = Node{T,NewickData{W,String}}
+
 """
     randtree(model::MSCSampler)
 
