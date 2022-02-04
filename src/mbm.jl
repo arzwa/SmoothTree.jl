@@ -104,7 +104,7 @@ randtree(model::NatMBM, n) = randtree(MomMBM(model), n)
 # recursion for randtree
 function _randwalk(node, model::MomMBM)
     clade = id(node)
-    isleafclade(clade) && return
+    isleafclade(clade) && return node
     splt = randsplit(model, clade)
     n1 = Node(splt, node)
     n2 = Node(clade - splt, node)
@@ -173,12 +173,52 @@ function prune!(x::M, atol) where {T,V,M<:AbstractMBM{T,V}}
     clades = Set(x.root)
     for (γ, x) in x.smap
         prune!(x, atol)
+        # all splits with non-negligible probabilities are to be kept
+        # note that we also need to keep the complements, which are
+        # not in the split distribution of γ but may have their own
+        # split distribution in the smap!
         union!(clades, keys(x.splits))
+        union!(clades, γ .- keys(x.splits))  
     end
-    toprune = setdiff(keys(x.smap), clades)
+    # those clades nowhere seen will be deleted
+    toprune = setdiff(keys(x.smap), clades)  
     for γ in toprune
         delete!(x.smap, γ)
     end
 end
 
+function allsplits(x::AbstractMBM)
+    map(collect(x.smap)) do (γ, splits)
+        map(x->(γ,x), collect(keys(splits.splits)))
+    end |> x->reduce(vcat, x)
+end
+
+"""
+    logpartition(x::AbstractMBM)
+
+Compute the log-partition function for `x`.
+
+The log-partition function of a categorical distribution on k categories with
+moment parameter `θ = (θ1, θ2, …, θ{k-1})` is `-log(1-∑i θi) = -log θk`. The
+MBM defines a categorical distribution on tree topologies. We have defined an
+order on trees (in particular we have a well-defined last tree, see `reftree`).
+So it appears we can easily compute -log θk. 
+"""
+logpartition(x::NatMBM) = -logpdf(MomMBM(x), reftree(x.root)) 
+logpartition(x::MomMBM) = -logpdf(x, reftree(x.root)) 
+
+# get the last tree in the induced tree order
+function reftree(x::T) where T
+    splits = Tuple{T,T}[]
+    function walk(x)
+        isleafclade(x) && return 
+        a = refsplit(x)
+        b = x - a
+        push!(splits, (x, a))
+        walk(a)
+        walk(b)
+    end
+    walk(x)
+    return splits
+end
 

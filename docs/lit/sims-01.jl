@@ -11,7 +11,9 @@ function getcladeθ(S, m)
         isleaf(n) && return m[name(n)]
         a = walk(n[1])
         b = walk(n[2])
-        d[a+b] = distance(n)
+        c = a+b
+        d[(c, a)] = distance(n[1])
+        d[(c, b)] = distance(n[2])
         return a+b
     end
     walk(S)
@@ -21,47 +23,45 @@ end
 # Note, if one assumes θ ~ Gamma(α, 1/β), then E[exp(-θ)] = (1+1/β)^-k
 # (from the mgf), which is approximately exp(-E[θ])
 
-T = UInt16
-#S = nw"(((A,B),C),(D,E));"
-S = nw"(((((A,B),C),(D,E)),(F,(G,H))),(I,J));"
-#S = nw"(((((((((A,B),C),(D,E)),(F,(G,H))),I),(J,K)),L),M),(O,P));"
-#T = UInt64
-#S = readnw("(((((((((((A,B),C),(D,E)),(F,(G,H))),I),(J,K)),L),M),(O,P)),Q),((R,S),T));", T)
-#S = readnw(readline("docs/data/mammals-song/mltrees.nw"))
-#T = UInt64
-#S = readnw(nwstr(S[1][1][2][1]), T)
-#S = readnw(nwstr(S[1][1][2][1]), T)
-ntaxa = length(getleaves(S))
+# simulate a species tree
+T = UInt32
+ntaxa = 20
+root = rootclade(ntaxa, T) 
+S = randtree(MomMBM(root, BetaSplitTree(-1., ntaxa)))
 l = SmoothTree.n_internal(S)
-#θ = rand(LogNormal(log(3.), 0.5), l)
 θ = rand(Gamma(4., 1/2), l)
 SmoothTree.setdistance_internal!(S, θ)
 m = taxonmap(S, T)
 d = getcladeθ(S, m)
+
+# simulate gene trees
 M = SmoothTree.MSC(S, m)
 N = 100
 G = randtree(M, m, N)
 ranking(G) .|> last
 
-#Sprior = NatBMP(CCD(G, lmap=m, α=10.))
-#Sprior = NatBMP(CCD(G, lmap=m, α=1.))
-#Sprior = NatBMP(CCD(G, lmap=m, α=1e-4))
-#Sprior = NatBMP(CCD(unique(G), α=0.1))
-#smple  = ranking(randtree(MomBMP(Sprior), 10000))
-root = T(2^ntaxa - 1)
-bsd  = BetaSplitTree(-1.0, cladesize(root))
-Sprior = NatMBM(root, bsd)
-priormean = 1.
-priorvar  = 2.
-θprior = BranchModel(T, SmoothTree.gaussian_mom2nat([log(priormean), priorvar]))
-
-data  = MomMBM.(CCD.(G, lmap=m), Ref(bsd), 1/2^(ntaxa-1))
+μ, V = 1., 1.
+a = 1/2^(ntaxa-1)
+bsd = BetaSplitTree(-1., ntaxa)
+data = CCD.(G, Ref(m))
+data = MomMBM.(data, Ref(bsd), a)
+Sprior = NatMBM(CCD(unique(G), m), bsd, 10.)
+#Sprior = NatMBM(T(sum(keys(m))), bsd)
+θprior = BranchModel(root, gaussian_mom2nat([log(μ), V]))
 model = MSCModel(Sprior, θprior, m)
-alg   = EPABC(data, model, λ=0.1, α=1/2^(ntaxa-1), prunetol=1e-6, minacc=50, target=100)
+alg = EPABC(data, model, prunetol=1e-5, λ=0.1, α=a, target=500, minacc=10, batch=500)
+
+# MAP tree under the prior
+maprior = ranking(randtree(Sprior, 10000)) .|> last
 
 # EP
 trace = pep!(alg, 1)
 trace = ep!(alg, 2)
+
+SmoothTree.tuneoff!(alg)
+trace = [trace; ep!(alg, 2)]
+
+# XXX somehow the length for the branch leading to ABC is not recorded
 
 smple = ranking(randtree(alg.model.S, 10000))
 SmoothTree.topologize(S)
@@ -79,18 +79,24 @@ X1, X2 = traceback(trace)
 
 # log scale
 mapS = first(smple)[1]
-clades = filter(n->!SmoothTree.isleafclade(n), id.(postwalk(mapS)))[1:end-1]
+nodes = filter(n->!isleaf(n) && !isroot(n), postwalk(mapS))
+clades = map(n->(id(parent(n)), id(n)), nodes) 
 pls = map(clades) do g
-    plot(Normal(log(priormean), √priorvar), color=:lightgray,
+    p = plot(Normal(log(μ), √V), color=:lightgray,
          fill=true, fillalpha=0.8, xlim=(-4.5,4.5), yticks=false, grid=false)
-    for model in trace[1:20:end]
-        lm, V = SmoothTree.gaussian_nat2mom(model.q[g])
-        plot!(Normal(lm, √V), color=:black)
+    for model in first.(trace[1:100:end])
+        lm, VV = SmoothTree.gaussian_nat2mom(model.q[g])
+        plot!(Normal(lm, √VV), color=:black)
     end
-    vline!([log(d[g])], color=:black, ls=:dot)
+    try
+        vline!([log(d[g])], color=:black, ls=:dot)
+    catch
+        @warn "incorrect phylogeny!"
+    end
+    p
 end 
 #xlabel!(pls[13], L"\theta")
-plot(pls...) #,layout=(3,5), size=(600,300))
+plot(pls..., layout=(3,6)) #,layout=(3,5), size=(600,300))
 #plot(p, bottom_margin=1.5mm)
 #savefig("docs/img/17taxa-posterior.pdf")
 

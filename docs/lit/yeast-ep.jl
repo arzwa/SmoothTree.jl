@@ -9,12 +9,14 @@ trees = readnw.(readlines("docs/data/yeast.mltrees"))
 tmap = SmoothTree.taxonmap(trees, UInt16)
 
 # we can compare using ML gene trees against acknowledging uncertainty
-#data  = CCD.(data_, lmap=tmap)  
-data  = CCD.(trees, lmap=tmap)
-alg = SmoothTree.epabc(data, tmap, β=-1.5, h=0., V=2.)
+data  = CCD.(data_, Ref(tmap))
+#data  = CCD.(trees, lmap=tmap)
+alg = SmoothTree.epabc(data, tmap, β=-1.5, h=0.01, V=2.)
 
 trace = pep!(alg, 1)
-trace = ep!(alg, 3)
+trace = ep!(alg, 2)
+SmoothTree.tuneoff!(alg)
+trace = [trace ; ep!(alg, 3)]
 
 # posterior inspection
 pS = SmoothTree.MomMBM(alg.model.S)

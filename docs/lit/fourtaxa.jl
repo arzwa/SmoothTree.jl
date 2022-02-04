@@ -4,7 +4,7 @@ using StatsBase, Distributions, Plots
 using Serialization
 using LaTeXStrings, StatsPlots, Measures
 default(gridstyle=:dot, legend=false, framestyle=:box,
-        title_loc=:left, titlefont=7)
+        title_loc=:left, titlefont=9)
 
 # Simulation and numerical posterior for the four-taxon case
 # this calls 'hybrid-coal' by Zha & Degnan
@@ -107,11 +107,12 @@ vline!([θ[2]], color=:black, ls=:dot)
 
 
 # EP inference
-root = UInt16(15)
+T = UInt16
+root = T(15)
 bsd  = BetaSplitTree(-1., cladesize(root))
 Sprior = NatMBM(root, bsd)
-θprior = BranchModel(UInt16, SmoothTree.gaussian_mom2nat([mean(prior), std(prior)^2]))
-data  = MomMBM.(CCD.(Y, lmap=m), Ref(bsd), 1e-9)
+θprior = BranchModel(Tuple{T,T}, SmoothTree.gaussian_mom2nat([mean(prior), std(prior)^2]))
+data  = MomMBM.(CCD.(Y, Ref(m)), Ref(bsd), 1e-9)
 model = MSCModel(Sprior, θprior, m)
 alg   = EPABC(data, model, λ=0.1, α=1e-9, target=500, minacc=100, prunetol=0.)
 trace = ep!(alg, 10);
@@ -125,12 +126,17 @@ map(xs) do (k, x)
     plot(p1, p2)
 end |> x-> plot(x..., size=(1200,500))
  
+post.S.smap[root]
+c2 = (0x000f, 0x0007)
+c1 = (0x0007, 0x0003)
+
 # posterior approximation for the relevant branch lengths
-lm1, V1 = SmoothTree.gaussian_nat2mom(post.q[3])
-lm2, V2 = SmoothTree.gaussian_nat2mom(post.q[7])
+lm1, V1 = SmoothTree.gaussian_nat2mom(post.q[c1])
+lm2, V2 = SmoothTree.gaussian_nat2mom(post.q[c2])
 d1 = Normal(lm1, √V1)
 d2 = Normal(lm2, √V2)
 
+# try to get a contour plot for the approximation density
 function getcontour(d1, d2, prior; q=0.1, steps=50)
     q1, q2 = quantile(prior, [q, 1-q])
     step = (q2-q1)/steps
@@ -144,13 +150,12 @@ zz = getindex.(ZZ, 3)
 zn = log.(lognormalize(z))
 zzn = log.(lognormalize(zz))
 
-# not so clear
 levels=-500:20:0
 pl1 = contourf(xx, yy, zzn, levels=levels, color=:magma,
                alpha=0.6, linewidth=0, xlim=(-2,2), ylim=(-2,2),
                ls=:dot, title="(A)")
 contour!(x, y, zn, grid=false, size=(350,350),
-        xlabel=L"\theta_1", ylabel=L"\theta_2",
+        xlabel=L"\phi_1", ylabel=L"\phi_2",
         levels=levels, color=:black, lw=1)
 hline!([θ[1]], color=:black)
 vline!([θ[2]], color=:black)
@@ -162,16 +167,47 @@ ps = lognormalize(z)
 p1 = vec(sum(ps, dims=1)) ./ (x[2] - x[1])
 p2 = vec(sum(ps, dims=2)) ./ (x[2] - x[1])
 
-pl2 = plot(prior, fill=true, color=:lightgray, legend=true, label=L"p(\theta)", alpha=0.5,
-           xlim=(-2,2), xlabel=L"\theta", ylabel="density", size=(350,270), fg_legend=:transparent, title="(B)")
-plot!(x, p1, fill=true, color=:gray, fillalpha=0.5, linealpha=0., label=L"p(\theta|X)")
+pl2 = plot(prior, fill=true, color=:lightgray, legend=true, label=L"p(\phi)",
+           alpha=0.5, xlim=(-2,2), xlabel=L"\phi", ylabel="density", yguidefont=8,
+           size=(350,270), fg_legend=:transparent, title="(B)")
+plot!(x, p1, fill=true, color=:gray, fillalpha=0.5, linealpha=0., label=L"p(\phi|X)")
 plot!(y, p2, fill=true, color=:gray, fillalpha=0.5, linealpha=0., label="")
 vline!(θ, color=:black, ls=:dot, label="")
-plot!(d1, color=:black, label=L"Q(\theta)")
+plot!(d1, color=:black, label=L"q(\phi)")
 plot!(d2, color=:black, label="")
 
-plot(pl1, pl2, size=(600,250), bottom_margin=2.7mm, left_margin=2mm,
-     dpi=300, layout=grid(1,2,widths=[0.4,0.6]))
+pps = SmoothTree.postpredsim(post, m, N, 1000)
+
+obs = Dict(hash(k)=>v for (k,v) in proportionmap(Y))
+comp = [(haskey(obs, k) ? obs[k] : 0, v) for (k,v) in pps]
+
+pl3 = plot(xticks=1:2:15, ylabel=L"P", xlabel=L"G", title="(C)", xtickfont=7)
+for (i,x) in enumerate(sort(comp, rev=true))
+    plot!(pl3, [i, i], quantile(x[2], [0.025, 0.975]), color=:lightgray, lw=3)
+    scatter!(pl3, [(i, x[1])], color=:black)
+end
+w = 800; h = 0.3w; w1=0.28; w2=(1-w1)/2
+plot(pl1, pl2, pl3, size=(w,h), bottom_margin=5mm, left_margin=3mm,
+     dpi=300, layout=grid(1,3, widths=[w1,w2,w2]))
+
+final_splits = SmoothTree.allsplits(post.S)
+splittrace = mapreduce(x->[MomMBM(x.S)[γ,δ] for (γ, δ) in final_splits], hcat, trace) |> permutedims
+
+all_splits = [final_splits; [(γ,γ-δ) for (γ,δ) in final_splits]]
+qs = map(x->SmoothTree.MomBranchModel(x.q), trace)
+mutrace = mapreduce(x->[x[(γ,δ)][1] for (γ, δ) in all_splits], hcat, qs) |> permutedims
+vtrace  = mapreduce(x->[x[(γ,δ)][2] for (γ, δ) in all_splits], hcat, qs) |> permutedims
+
+kwargs = (xscale=:log10, xticks=[1, 10, 100, 1000])
+ps4 = [plot(splittrace, title="(D)", ylabel=L"\theta"; kwargs...), 
+     plot(mutrace, ylabel=L"\mu", xlabel="iteration", xguidefont=8; kwargs...), 
+     plot(vtrace, ylabel=L"\sigma^2"; kwargs...)]
+
+pl4 = plot(ps4..., layout=(1,3), xticks=[1, 10, 100, 1000])
+
+plot(pl1, pl2, pl3, ps4..., layout=grid(2,3,widths=[1/3,1/3,1/3]), dpi=300)
 
 savefig("docs/img/fourtaxon.pdf")
 savefig("docs/img/fourtaxon.png")
+
+

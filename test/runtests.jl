@@ -3,11 +3,12 @@ using SmoothTree, Test, NewickTree
 using StatsBase, Distributions
 
 @testset "SmoothTree tests" begin
-    treesfile = joinpath(@__DIR__, "test/OG0006030.trees")
-    #treesfile = joinpath(@__DIR__, "OG0006030.trees")
+    treesfile = joinpath(@__DIR__, "OG0006030.trees")
+    #treesfile = joinpath(@__DIR__, "test/OG0006030.trees")
     trees = readnw.(readlines(treesfile))
     trees = SmoothTree.rootall!(trees)
-    ccd = CCD(trees)
+    tmap  = taxonmap(trees)
+    ccd   = CCD(trees, tmap)
 
     @testset "Beta-splitting SparseSplits" begin
         γ = UInt8(15)
@@ -81,54 +82,42 @@ using StatsBase, Distributions
         end
     end
 
-    @testset "marginal p of subset tree" begin
-        leaves = collect(values(ccd.lmap))[[1,2,3,5,7]]
-        treec = countmap(trees)
-        ts = typeof(treec)()
-        for (x, c) in treec
-            st = NewickTree.extract(x, leaves)
-            haskey(ts, st) ? ts[st] += c : ts[st] = c
-        end
-        submap = SmoothTree.BiMap(Dict(k=>v for (k,v) in ccd.lmap if v ∈ leaves))
-        subccd = CCD(ts, lmap=submap)
-        x = randsplits(subccd)
-        logpdf(subccd, x)
-        SmoothTree.marginallogpdf(ccd, x)
-
-    end
-
     @testset "BranchModel algebra" begin
         q1 = BranchModel(UInt16, [1., -1.])
         q2 = BranchModel(UInt16, [2., -4.])
         q3 = 0.1q1 + 2.1q2
-        m3 = MomBranchModel(q3)
+        m3 = SmoothTree.MomBranchModel(q3)
         @test all(BranchModel(m3).η0 .== q3.η0)
     end
 
     @testset "NatBMP algebra" begin 
+        using SmoothTree: nat2mom, mom2nat
         S = nw"((B:Inf,C:Inf):0.5,A:Inf);"
-        m = SmoothTree.taxonmap(S)
-        M = SmoothTree.MSC(S, m)
+        m = taxonmap(S)
+        M = MSC(S, m)
         Y = randtree(M, m, 100)
-        X = NatBMP(CCD(Y, α=1.))
+        bsd = BetaSplitTree(-1., length(m))
+        X = NatMBM(CCD(Y, m), bsd, 1.)
         # sparsesplits algebra
         y = X.smap[0x0007]
         z = mom2nat(nat2mom(0.2y + 0.8y))
         @test z.η0 ≈ y.η0
         @test all(values(z.splits) .≈ values(y.splits))
-        X = NatBMP(CCD(Y[1:2], α=1.))
-        y = X.smap[0x0007]
-        z = SmoothTree.SparseSplits(typeof(y.splits)(), 3, 0, 0., y.ref)
+        X = NatMBM(CCD(Y[1:2], m), bsd, 1.)
+        γ = 0x0007
+        y = X.smap[γ]
+        z = SmoothTree.SparseSplits(γ, Dict{UInt16,Int}(), bsd, 1.)
         @test (y + z).η0 ≈ y.η0
         @test (y - y).η0 ≈ z.η0
     end
 
     @testset "MSCModel" begin
         S = nw"((B:Inf,C:Inf):0.5,A:Inf);"
-        m = SmoothTree.taxonmap(S)
-        M = SmoothTree.MSC(S, m)
+        m = taxonmap(S)
+        M = MSC(S, m)
         Y = randtree(M, m, 100)
-        X = NatBMP(CCD(Y, α=1.))
+        b = BetaSplitTree(-1., length(m))
+        X = NatMBM(CCD(Y, m), b, 1.)
         q = BranchModel(UInt16, [1., -1.])
         M1 = MSCModel(X, q, m)
         M2 = M1 + M1*0.3
@@ -167,6 +156,89 @@ using StatsBase, Distributions
         @test all(values(trees) .- 1/3 .< 0.01)
     end
 
+    @testset "logpdf" begin
+        # we test whether the probability distribution sums to one
+        using SmoothTree: initccd
+        S = nw"(((A,B),C),D);"
+        m = taxonmap(S)
+        # prior distribution sums to one
+        bsd = BetaSplitTree(-1.5, length(m))
+        mbm = MomMBM(sum(keys(m)), bsd)
+        trees = unique(randsplits(mbm, 10000))
+        @test length(trees) == 15
+        p = mapreduce(tree->exp(logpdf(mbm, tree)), +, trees)
+        @test p ≈ 1
+        # known tree gives P = 1
+        ccd = CCD(S, m)
+        @test logpdf(ccd, randtree(ccd)) ≈ 0.
+        # posterior sums to one
+        mbm = MomMBM(ccd, bsd, .5)
+        trees = unique(randsplits(mbm, 10000))
+        p = mapreduce(tree->exp(logpdf(mbm, tree)), +, trees)
+        @test p ≈ 1.
+    end
+
+    @testset "Verify sampler with logpdf/logpdf with sampler" begin
+        for α=[0.1, 1., 10.], β=[-1.99, -1.5, -1., 0., 1., Inf]
+            n = 100
+            # we get some 'observed data' from MSC simulations
+            S = nw"(((A,B),C),D);"
+            m = taxonmap(S)
+            bsd = BetaSplitTree(β, length(m))
+            SmoothTree.setdistance!(S, 5.)
+            model = MSC(S, SmoothTree.default_init(S, m))
+            data = CCD(randtree(model, m, 1000), m)
+            # we construct a BMP tree prior
+            treeprior = MomMBM(CCD(randtree(ccd, n), m), bsd, α)
+            # estimate the likelihood of the 15 trees using simulation
+            trees = SmoothTree.ranking(randsplits(treeprior, 100000))
+            # compute the likelihood of the 15 trees algorithmically
+            ls = exp.(logpdf.(Ref(treeprior), first.(trees)))
+            ps = last.(trees)
+            # compare
+            #for i=1:15; @printf "%s %.4f %.4f\n" trees[i][1] trees[i][2] ls[i]; end
+            @test all(isapprox(ls, ps, rtol=0.2))
+        end
+    end
+
+    @testset "Tree isomorphism" begin
+        t1 = nw"(((((gge,iov),(xtz,dzq)),sgt),smo),jvs);"
+        t2 = nw"((smo,(((gge,iov),(xtz,dzq)),sgt)),jvs);"
+        m = taxonmap(t1)
+        @test SmoothTree.isisomorphic(t1, t2, m)
+    end
+
+end
+
+#=
+    @testset "marginal p of subset tree" begin
+        leaves = collect(values(ccd.lmap))[[1,2,3,5,7]]
+        treec = countmap(trees)
+        ts = typeof(treec)()
+        for (x, c) in treec
+            st = NewickTree.extract(x, leaves)
+            haskey(ts, st) ? ts[st] += c : ts[st] = c
+        end
+        submap = SmoothTree.BiMap(Dict(k=>v for (k,v) in ccd.lmap if v ∈ leaves))
+        subccd = CCD(ts, lmap=submap)
+        x = randsplits(subccd)
+        logpdf(subccd, x)
+        SmoothTree.marginallogpdf(ccd, x)
+    end
+    
+    @testset "marginal clade size" begin
+        using SmoothTree: cladesize, getcladesbits
+        S = nw"((smo,(((gge,iov),(xtz,dzq)),sgt)),jvs);"
+        # prior distribution sums to one
+        ccd = SmoothTree.initccd(S, UInt8, 10.)  # an empty CCD
+        trees = randtree(ccd, 100000)
+        empirical = [cladesize.(getcladesbits(t)) for t in trees]
+        map(1:7) do k
+            p = length(filter(x->k ∈ x, empirical)) / length(empirical)
+            @test SmoothTree._pcladesize(7,k) ≈ p rtol=0.1
+        end
+    end
+    
     @testset "Prior/regularization" begin
         ccd = CCD(["A","B","C","D"], α=1.)
         @test ccd.cmap[maximum(keys(ccd.cmap))] == 0
@@ -181,78 +253,5 @@ using StatsBase, Distributions
         end
     end
 
-    @testset "logpdf" begin
-        # we test whether the probability distribution sums to one
-        using SmoothTree: initccd
-        S = nw"(((A,B),C),D);"
-        # prior distribution sums to one
-        ccd = CCD(["A","B","C","D"], α=1.)  # an empty CCD
-        trees = unique(randtree(ccd, 10000))
-        @test length(trees) == 15
-        p = mapreduce(tree->exp(logpdf(ccd, tree)), +, trees)
-        @test p ≈ 1
-        # known tree gives P = 1
-        ccd = CCD(S, α=0.)
-        @test logpdf(ccd, randtree(ccd)) ≈ 0.
-        # posterior sums to one
-        ccd = CCD(S, α=.5)
-        trees = unique(randtree(ccd, 10000))
-        p = mapreduce(tree->exp(logpdf(ccd, tree)), +, trees)
-        @test p ≈ 1.
-    end
 
-    @testset "Verify sampler with logpdf/logpdf with sampler" begin
-        for α=[0.1, 0.5, 1., 2.]
-            n = 1000
-            # we get some 'observed data' from MSC simulations
-            S = nw"(((A,B),C),D);"
-            m = taxonmap(S)
-            SmoothTree.setdistance!(S, 5.)
-            model = SmoothTree.MSC(S, SmoothTree.default_init(S, m))
-            #data = CCD(model, SmoothTree.randsplits(model, 1000), α=0.001) 
-            data = SmoothTree.randtree(model, m, 1000)
-            ccd = CCD(data, lmap=m, α=0.001) 
-            # we construct a BMP tree prior
-            treeprior = CCD(randtree(ccd, n), α=α*n)
-            # estimate the likelihood of the 15 trees using simulation
-            trees = SmoothTree.ranking(randtree(treeprior, 100000))
-            # compute the likelihood of the 15 trees algorithmically
-            ls = exp.(logpdf.(Ref(treeprior), first.(trees)))
-            ps = last.(trees)
-            # compare
-            #for i=1:15; @printf "%s %.4f %.4f\n" trees[i][1] trees[i][2] ls[i]; end
-            @test all(isapprox(ls, ps, rtol=0.2))
-        end
-    end
-
-    @testset "CCD from MSC sims" begin
-        S = nw"((smo,(((gge,iov),(xtz,dzq)),sgt)),jvs);"
-        θ = 1.
-        SmoothTree.setdistance!(S, θ)
-        model = MSC(S)
-        data1 = CCD(model, randsplits(model, 10), α=1e-2)
-        data2 = CCD(model, randsplits(model, 10), α=1e-2)
-        SmoothTree.symmkldiv(data1, data2)
-    end
-
-    @testset "Tree isomorphism" begin
-        t1 = nw"(((((gge,iov),(xtz,dzq)),sgt),smo),jvs);"
-        t2 = nw"((smo,(((gge,iov),(xtz,dzq)),sgt)),jvs);"
-        m = taxonmap(t1)
-        @test SmoothTree.isisomorphic(t1, t2, m)
-    end
-
-    @testset "marginal clade size" begin
-        using SmoothTree: cladesize, getcladesbits
-        S = nw"((smo,(((gge,iov),(xtz,dzq)),sgt)),jvs);"
-        # prior distribution sums to one
-        ccd = SmoothTree.initccd(S, UInt8, 10.)  # an empty CCD
-        trees = randtree(ccd, 100000)
-        empirical = [cladesize.(getcladesbits(t)) for t in trees]
-        map(1:7) do k
-            p = length(filter(x->k ∈ x, empirical)) / length(empirical)
-            @test SmoothTree._pcladesize(7,k) ≈ p rtol=0.1
-        end
-    end
-
-end
+=#

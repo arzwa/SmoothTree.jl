@@ -21,65 +21,35 @@ likelihood free EP) algorithm struct. See `ep!` and `pep!`.
     data ::X
     model::M
     sites::Vector{M}
+    siteC::Vector{Float64}
     λ::Float64 = 0.1    # for damped update...
     α::Float64 = 1e-16  # Dirichlet-MBM parameter for 'moment matching'
-    minacc = 100
-    target = 500
-    maxsim = 1e5 
-    fillup = true
-    prunetol = 0.
+    minacc::Int = 100
+    target::Int = 500
+    maxsim::Int = 1e5 
+    h::Float64 = 1.
+    tuneh::Bool = true
+    batch::Int = 1
+    prunetol::Float64 = 0.
+end
+
+function tuneoff!(alg)
+    alg.h = 1.
+    alg.tuneh = false
 end
 
 function EPABC(data, prior::T; kwargs...) where T
     sites = Vector{T}(undef, length(data)+1)
+    siteC = fill(-Inf, length(data))
     sites[end] = prior  # last entry is the prior
-    EPABC(data=data, model=prior, sites=sites; kwargs...)
+    EPABC(data=data, model=prior, sites=sites, siteC=siteC; kwargs...)
 end
 
-function prune!(alg)
-    alg.prunetol == 0. && return
-    map(site->prune!(site, alg.prunetol), alg.sites)
-    alg.model = reduce(+, alg.sites)
-end
+# get the prior
+prior(alg) = alg.sites[end]
 
 # get the cavity distribution
 getcavity(i, m, s) = isassigned(s, i) ? m - s[i] : m
-
-function ep_iteration(alg, i)
-    @unpack data, model, sites, λ, α = alg
-    @unpack minacc, target, maxsim, fillup = alg
-    X = alg.data[i]
-    cavity = getcavity(i, model, sites)
-    smpler = MSCSampler(cavity)
-    sptree = randtree(smpler)
-    init = Dict(id(n)=>[id(n)] for n in getleaves(sptree))
-    S = typeof(sptree)
-    accsims = Tuple{Float64,S}[]
-    othsims = Tuple{Float64,S}[]
-    nacc = n = 0
-    while true   # this could be parallelized to some extent using blocks
-        n += 1
-        G = randsplits(MSC(sptree, init))
-        l = logpdf(data[i], G)
-        if log(rand()) < l
-            nacc += 1
-            push!(accsims, (l, sptree))
-        else
-            push!(othsims, (l, sptree))
-        end
-        (n ≥ maxsim || nacc ≥ target) && break
-        sptree = randtree(smpler)
-    end
-    if (nacc < minacc) && !fillup  # failed update
-        full = model
-    else
-        top = sort(othsims, by=first, rev=true)[1:(minacc-nacc)]
-        push!(accsims, top...)
-        accS = last.(accsims)
-        full = matchmoments(accS, cavity, alg.α)
-    end
-    return nacc, n, full, cavity, accsims
-end
 
 """
     ep!(alg, n; kwargs...)
@@ -105,48 +75,191 @@ function ep_serial!(alg; rnd=true)
     rnge = rnd ? shuffle(1:length(alg.data)) : 1:length(alg.data)
     iter = ProgressBar(rnge)
     nacc = n = 0
+    ev = -Inf
     trace = map(iter) do i
-        set_description(iter, string(@sprintf("%4d%4d/%6d", i, nacc, n)))
-        nacc, n, full, cavity, _ = ep_iteration(alg, i)
-        update!(alg, full, cavity, i) 
+        desc = string(@sprintf("%8.3gh%4d%4d/%6d%11.3f", alg.h, i, nacc, n, ev))
+        set_description(iter, desc)
+        nacc, n, h, full, cavity, _ = ep_iteration(alg, i)
+        alg.h = h
+        update!(alg, full, cavity, i, nacc/n) 
+        ev = evidence(alg)
+        alg.model, ev
     end 
     prune!(alg)
     return trace
 end
 
-"""
-    ep_parallel!(alg)
+# a helper struct for storing the EP inner iteration simulations
+mutable struct Simulations{S,T}
+    accsims::Vector{Tuple{T,S}}
+    allsims::Vector{Tuple{T,S}}
+    us::Vector{T}
+end
 
-Embarrassingly parallel EP pass.
-"""
-function ep_parallel!(alg)
-    N = length(alg.data)
-    iter = ProgressBar(1:N)
-    Threads.@threads for i in iter
-        nacc, n, full, cavity, _ = ep_iteration(alg, i)
-        alg.sites[i] = full - cavity
-        set_description(iter, string(@sprintf("%4d%4d/%6d", i, nacc, n)))
-    end
-    alg.sites[1:N] .= map(x->alg.λ*x, alg.sites[1:N])
-    alg.model = reduce(+, alg.sites)
-    # XXX deal with damped updates... 
-    prune!(alg)
-    return alg.model
+function Simulations(S)
+    accsims = Tuple{Float64,S}[]
+    allsims = Tuple{Float64,S}[]
+    Simulations(accsims, allsims, Float64[])
 end
     
-# not using the cavity...
-function update!(alg, full, cavity, i)
-    @unpack λ = alg
+"""
+    ep_iteration(alg, i)
+
+Do a single EP site update.
+"""
+function ep_iteration(alg, i)
+    @unpack model, sites, λ, α, minacc, target, maxsim, tuneh = alg
+    X = alg.data[i]
+    cavity = getcavity(i, model, sites)
+    smpler = MSCSampler(cavity)
+    sptree = randtree(smpler)
+    init = Dict(id(n)=>[id(n)] for n in getleaves(sptree))
+    sims = Simulations(eltype(smpler))
+    if alg.batch > 1
+        n, nacc = _inner_threaded!(X, smpler, init, alg, sims)
+    else
+        n, nacc = _inner_serial!(X, smpler, init, alg, sims)
+    end
+    h, nacc = _tuneh!(alg, n, nacc, sims)
+    full, nacc = _momentmatching(alg, cavity, nacc, sims)
+    return nacc, n, h, full, cavity, sims
+end
+
+"""
+    _inner_serial!(...)
+
+This is in the ABC simulation algorithm within the EP site update (see Bartelmé
+& Chopin), implemented in a serial fashion.
+"""
+function _inner_serial!(X, smpler, init, alg, sims)
+    nacc = n = 0
+    corr = log(alg.h) 
+    while true   # this could be parallelized to some extent using blocks
+        n += 1
+        sptree = randtree(smpler)
+        G = randsplits(MSC(sptree, init))
+        l = logpdf(X, G)
+        u = log(rand())
+        if u - corr < l
+            nacc += 1
+            push!(sims.accsims, (l, sptree))
+        end
+        push!(sims.us, u)  # store the random numbers...
+        push!(sims.allsims, (l, sptree))
+        (n ≥ alg.maxsim || nacc ≥ alg.target) && break
+        sptree = randtree(smpler)
+    end
+    return n, nacc
+end
+
+"""
+    _inner_threaded!(...)
+
+See `_inner_serial!`, but in a multi-threaded implementation using a
+user-defined batch size for simulation batches executed in parallel.
+"""
+function _inner_threaded!(X, smpler, init, alg, sims)
+    nacc = n = 0
+    corr = log(alg.h) 
+    while true
+        # simulate in parallel in batches of size `alg.batch`
+        y = similar(sims.allsims, alg.batch)
+        Threads.@threads for j=1:alg.batch
+            sptree = randtree(smpler)
+            G = randsplits(MSC(sptree, init))
+            l = logpdf(X, G)
+            y[j] = (l, sptree)
+        end
+        u = log.(rand(alg.batch))
+        accepted = u .- corr .< first.(y)
+        sims.accsims = vcat(sims.accsims, y[accepted])
+        sims.allsims = vcat(sims.allsims, y)
+        sims.us = vcat(sims.us, u)
+        nacc += sum(accepted)
+        n += alg.batch
+        (n ≥ alg.maxsim || nacc ≥ alg.target) && break
+    end
+    return n, nacc
+end
+
+"""
+    _tuneh!(...)
+
+Tune the `h` parameter and re-evaluate accepted simulations.
+"""
+function _tuneh!(alg, n, nacc, sims)
+    @unpack us, allsims, accsims = sims
+    !alg.tuneh && return alg.h, nacc
+    !(nacc < alg.target || alg.h != 1.) && return alg.h, nacc
+    ls = first.(allsims)
+    Ep = exp(logsumexp(ls))/n  # expected number of accepted simulations
+    h = max(1., alg.target / (alg.maxsim * Ep))
+    # if we did not reach the target, the new r is better for the
+    # current set of simulations.
+    us .-= log(h)  # re-use the random numbers but with different `r`
+    ix = filter(i->us[i] < allsims[i][1], 1:length(allsims))
+    sims.accsims = allsims[ix]
+    nacc = length(sims.accsims)
+    return h, nacc
+end
+    
+"""
+    _momentmatching(...)
+
+Compute the new global approximation by approximating the tilted distribution
+within the exponential family using some form of moment matching.
+"""
+function _momentmatching(alg, cavity, nacc, sims)
+    nacc < alg.minacc && return alg.model, 0
+    full = matchmoments(last.(sims.accsims), cavity, alg.α)
+    return full, nacc
+end
+
+#"""
+#    ep_parallel!(alg)
+#
+#Embarrassingly parallel EP pass.
+#"""
+#function ep_parallel!(alg)
+#    N = length(alg.data)
+#    iter = ProgressBar(1:N)
+#    Threads.@threads for i in iter
+#        nacc, n, h, full, cavity, _ = ep_iteration(alg, i)
+#        alg.sites[i] = full - cavity
+#        desc = string(@sprintf("%8.3gh%4d%4d/%6d", h, i, nacc, n))
+#        set_description(iter, desc)
+#    end
+#    alg.sites[1:N] .= map(x->alg.λ*x, alg.sites[1:N])
+#    alg.model = reduce(+, alg.sites)
+#    # XXX deal with damped updates... 
+#    prune!(alg)
+#    return alg.model
+#end
+    
+function update!(alg, full, cavity, i, Z)
+    @unpack λ, prunetol = alg
     siteup = λ * (full - alg.model)
-    alg.sites[i] = isassigned(alg.sites, i) ? 
-        alg.sites[i] + siteup : siteup
+    prunetol != 0. && prune!(siteup, prunetol)  # should we?
+    alg.sites[i] = isassigned(alg.sites, i) ? alg.sites[i] + siteup : siteup
     alg.model = alg.model + siteup
+    if Z > 0
+        alg.siteC[i] = log(Z) - logpartition(alg.model) + logpartition(cavity)
+    end
+    # I am not 100% sure about the normalizing constant -- how does this play
+    # with λ? should we use the updated model or not?
+end
+
+function prune!(alg)
+    @unpack prunetol, sites = alg
+    prunetol == 0. && return
+    map(i->isassigned(sites, i) && prune!(sites[i], prunetol), 1:length(sites))
+    alg.model = reduce(+, sites)
 end
 
 """
     traceback
 """
-function traceback(trace)
+function traceback(trace; sigdigits=3)
     clades = keys(trace[end].S.smap)
     splits = Dict(γ=>collect(keys(trace[end].S.smap[γ].splits)) for γ in clades)
     qclade = keys(trace[end].q.cmap)
@@ -164,7 +277,12 @@ function traceback(trace)
             push!(θtrace[γ], y)
         end
     end
-    c = Dict(γ=>permutedims(hcat(reverse(xs)...)) for (γ, xs) in traces)
-    θ = Dict(γ=>permutedims(hcat(reverse(xs)...)) for (γ, xs) in θtrace)
+    f(x) = round.(permutedims(hcat(reverse(x)...)), sigdigits=sigdigits)
+    c = Dict(γ=>f(xs) for (γ, xs) in traces)
+    θ = Dict(γ=>f(xs) for (γ, xs) in θtrace)
     return c, θ
+end
+
+function evidence(alg)
+    sum(alg.siteC) + logpartition(alg.model) - logpartition(prior(alg))
 end
