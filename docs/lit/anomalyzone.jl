@@ -7,16 +7,16 @@ default(gridstyle=:dot, legend=false, framestyle=:box, title_loc=:left, titlefon
 
 # simulate a species tree
 T = UInt16
-ntaxa = 5
+ntaxa = 6
 root = rootclade(ntaxa, T) 
-S = nw"((((A,B),C),D),E);"
+S = randtree(NatMBM(root, BetaSplitTree(-2., ntaxa)))  # simulate a pectinate tree
 l = SmoothTree.n_internal(S)
 SmoothTree.setdistance!(S, 1/(ntaxa-1))
 m = taxonmap(S, T)
 
 # simulate gene trees
 M = SmoothTree.MSC(S, m)
-N = 500
+N = 100
 G = randtree(M, m, N)
 ranking(G) 
 
@@ -28,20 +28,20 @@ ranking(G)
 # inference
 μ, V = .5, 2.
 a = 1/2^(ntaxa-1)
-bsd = BetaSplitTree(-1., ntaxa)
+bsd = BetaSplitTree(-1.5, ntaxa)
 data = CCD.(G, Ref(m))
 data = MomMBM.(data, Ref(bsd), a)
-#Sprior = NatMBM(CCD(unique(G), m), bsd, 100.)
-Sprior = NatMBM(T(sum(keys(m))), bsd)
-θprior = BranchModel(Tuple{T,T}, gaussian_mom2nat([log(μ), V]))
+Sprior = NatMBM(CCD(unique(G), m), bsd, 100.)
+#Sprior = NatMBM(root, bsd)
+θprior = BranchModel(root, gaussian_mom2nat([log(μ), V]))
 model = MSCModel(Sprior, θprior, m)
 alg = EPABC(data, model, prunetol=0., λ=0.1, α=1e-3, target=100, minacc=10, batch=100)
 
-trace = ep!(alg, 4)
+trace = ep!(alg, 2)
 SmoothTree.tuneoff!(alg)
 trace = [trace; ep!(alg, 1)]
 
-trace = [trace; ep!(alg, 3)]
+#trace = [trace; ep!(alg, 3)]
 
 smple = ranking(randtree(alg.model.S, 10000))
 SmoothTree.topologize(S)
