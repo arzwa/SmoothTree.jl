@@ -1,3 +1,8 @@
+# issues:
+# - the adaptive strategy could probably be optimized further...
+# - the marginal likelihood is -Inf whenever there are data points with no
+#   accepted simulations
+
 abstract type AbstractEPABC end
 
 """
@@ -24,13 +29,13 @@ likelihood free EP) algorithm struct. See `ep!` and `pep!`.
     siteC::Vector{Float64}
     λ::Float64 = 0.1    # for damped update...
     α::Float64 = 1e-16  # Dirichlet-MBM parameter for 'moment matching'
-    minacc::Int = 100
+    minacc::Int = 10
     target::Int = 500
     maxsim::Int = 1e5 
     h::Float64 = 1.
     tuneh::Bool = true
     batch::Int = 1
-    prunetol::Float64 = 0.
+    prunetol::Float64 = 1e-9
 end
 
 function tuneoff!(alg)
@@ -101,6 +106,8 @@ function Simulations(S)
     allsims = Tuple{Float64,S}[]
     Simulations(accsims, allsims, Float64[])
 end
+
+idinit(tree) = Dict(id(n)=>[id(n)] for n in getleaves(tree))
     
 """
     ep_iteration(alg, i)
@@ -113,9 +120,9 @@ function ep_iteration(alg, i)
     cavity = getcavity(i, model, sites)
     smpler = MSCSampler(cavity)
     sptree = randtree(smpler)
-    init = Dict(id(n)=>[id(n)] for n in getleaves(sptree))
+    init = idinit(sptree)
     sims = Simulations(eltype(smpler))
-    if alg.batch > 1
+    if alg.batch > 1 && Threads.nthreads() > 1
         n, nacc = _inner_threaded!(X, smpler, init, alg, sims)
     else
         n, nacc = _inner_serial!(X, smpler, init, alg, sims)
@@ -283,6 +290,16 @@ function traceback(trace; sigdigits=3)
     return c, θ
 end
 
-function evidence(alg)
-    sum(alg.siteC) + logpartition(alg.model) - logpartition(prior(alg))
+evidence(alg) = sum(alg.siteC) + logpartition(alg.model) - logpartition(prior(alg))
+
+# ad hoc regularized estimate of the marginal likelihood (imputes -Inf site
+# norm factors as having value ϵ (should be < log(1/M) at least).
+function evidence(alg, ϵ)
+    Z = logpartition(alg.model) - logpartition(prior(alg))
+    for Ci in alg.siteC
+        Z += isfinite(Ci) ? Ci : ϵ
+    end
+    return Z
 end
+
+

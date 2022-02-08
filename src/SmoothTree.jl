@@ -27,10 +27,10 @@ function epabc(data, tmap; β=-1.5, a=0., μ=1., V=2., kwargs...)
     root = T(sum(keys(tmap)))
     bsd  = BetaSplitTree(β, ntax)
     if a > 0.
-        data = MomMBM.(data, Ref(bsd), h)
+        data = MomMBM.(data, Ref(bsd), a)
     end
     Sprior = NatMBM(root, bsd)
-    θprior = BranchModel(T, gaussian_mom2nat([log(μ), V]))
+    θprior = BranchModel(root, gaussian_mom2nat([log(μ), V]))
     model = MSCModel(Sprior, θprior, tmap)
     alg = EPABC(data, model; kwargs...)
 end

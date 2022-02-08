@@ -25,7 +25,7 @@ end
 
 # simulate a species tree
 T = UInt32
-ntaxa = 20
+ntaxa = 12
 root = rootclade(ntaxa, T) 
 S = randtree(MomMBM(root, BetaSplitTree(-1., ntaxa)))
 l = SmoothTree.n_internal(S)
@@ -45,21 +45,20 @@ a = 1/2^(ntaxa-1)
 bsd = BetaSplitTree(-1., ntaxa)
 data = CCD.(G, Ref(m))
 data = MomMBM.(data, Ref(bsd), a)
-Sprior = NatMBM(CCD(unique(G), m), bsd, 10.)
+Sprior = NatMBM(CCD(unique(G), m), bsd, 50.)
 #Sprior = NatMBM(T(sum(keys(m))), bsd)
 θprior = BranchModel(root, gaussian_mom2nat([log(μ), V]))
 model = MSCModel(Sprior, θprior, m)
-alg = EPABC(data, model, prunetol=1e-5, λ=0.1, α=a, target=500, minacc=10, batch=500)
+alg = EPABC(data, model, prunetol=1e-5, λ=0.1, α=a, target=100, minacc=5,
+            batch=1000, maxsim=1e5)
 
 # MAP tree under the prior
 maprior = ranking(randtree(Sprior, 10000)) .|> last
 
 # EP
-trace = pep!(alg, 1)
 trace = ep!(alg, 2)
-
 SmoothTree.tuneoff!(alg)
-trace = [trace; ep!(alg, 2)]
+trace = [trace; ep!(alg, 1)]
 
 # XXX somehow the length for the branch leading to ABC is not recorded
 
@@ -149,3 +148,19 @@ plot(p)
 
 
 plot(pls..., p)
+
+
+# exploration
+N = 100000
+ms = randtree(model, N)
+init = SmoothTree.idinit(ms[1]) 
+ys = map(m->randsplits(SmoothTree.MSC(m, init)), ms)
+
+ls = map(data) do x
+    @show x
+    map(y->logpdf(x,y), ys)
+end
+
+exp.(map(logsumexp, ls))
+
+

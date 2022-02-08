@@ -11,9 +11,9 @@ tmap = SmoothTree.taxonmap(trees, UInt16)
 # we can compare using ML gene trees against acknowledging uncertainty
 data  = CCD.(data_, Ref(tmap))
 #data  = CCD.(trees, lmap=tmap)
-alg = SmoothTree.epabc(data, tmap, β=-1.5, h=0.01, V=2.)
+alg = SmoothTree.epabc(data, tmap, β=-1.5, α=1e-4, a=0.01, V=2., batch=100,
+                       minacc=10, target=100)
 
-trace = pep!(alg, 1)
 trace = ep!(alg, 2)
 SmoothTree.tuneoff!(alg)
 trace = [trace ; ep!(alg, 3)]
