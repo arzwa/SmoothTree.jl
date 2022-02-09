@@ -25,7 +25,7 @@ end
 
 # simulate a species tree
 T = UInt32
-ntaxa = 12
+ntaxa = 9
 root = rootclade(ntaxa, T) 
 S = randtree(MomMBM(root, BetaSplitTree(-1., ntaxa)))
 l = SmoothTree.n_internal(S)
@@ -45,18 +45,19 @@ a = 1/2^(ntaxa-1)
 bsd = BetaSplitTree(-1., ntaxa)
 data = CCD.(G, Ref(m))
 data = MomMBM.(data, Ref(bsd), a)
-Sprior = NatMBM(CCD(unique(G), m), bsd, 50.)
+Sprior = NatMBM(CCD(unique(G), m), bsd, 100.)
 #Sprior = NatMBM(T(sum(keys(m))), bsd)
 θprior = BranchModel(root, gaussian_mom2nat([log(μ), V]))
 model = MSCModel(Sprior, θprior, m)
 alg = EPABC(data, model, prunetol=1e-5, λ=0.1, α=a, target=100, minacc=5,
-            batch=1000, maxsim=1e5)
+            batch=1000, maxsim=1e5, h=1e9, ν=0.2)
 
 # MAP tree under the prior
-maprior = ranking(randtree(Sprior, 10000)) .|> last
+maprior = ranking(randtree(Sprior, 10000)) 
 
 # EP
-trace = ep!(alg, 2)
+trace = ep!(alg, 3)
+
 SmoothTree.tuneoff!(alg)
 trace = [trace; ep!(alg, 1)]
 
@@ -65,9 +66,10 @@ trace = [trace; ep!(alg, 1)]
 smple = ranking(randtree(alg.model.S, 10000))
 SmoothTree.topologize(S)
 SmoothTree.relabel(first(smple)[1], m)
+SmoothTree.relabel(first(maprior)[1], m)
 
 # Analysis
-X1, X2 = traceback(trace)
+X1, X2 = traceback(first.(trace))
 
 #xs = filter(x->size(x[2], 2) > 1, collect(X1))
 #map(xs) do (k, x)
@@ -95,7 +97,7 @@ pls = map(clades) do g
     p
 end 
 #xlabel!(pls[13], L"\theta")
-plot(pls..., layout=(3,6)) #,layout=(3,5), size=(600,300))
+plot(pls...) #,layout=(3,5), size=(600,300))
 #plot(p, bottom_margin=1.5mm)
 #savefig("docs/img/17taxa-posterior.pdf")
 

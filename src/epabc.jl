@@ -33,6 +33,7 @@ likelihood free EP) algorithm struct. See `ep!` and `pep!`.
     target::Int = 500
     maxsim::Int = 1e5 
     h::Float64 = 1.
+    ν::Float64 = 0.1
     tuneh::Bool = true
     batch::Int = 1
     prunetol::Float64 = 1e-9
@@ -47,7 +48,19 @@ function EPABC(data, prior::T; kwargs...) where T
     sites = Vector{T}(undef, length(data)+1)
     siteC = fill(-Inf, length(data))
     sites[end] = prior  # last entry is the prior
-    EPABC(data=data, model=prior, sites=sites, siteC=siteC; kwargs...)
+    alg = EPABC(data=data, model=prior, sites=sites, siteC=siteC; kwargs...)
+    return alg
+end
+
+# get an initial estimate for `h`
+function initialize_h!(alg)
+    sims = randtree(alg.model, alg.maxsim)    
+    init = idinit(sims[1])
+    ys = map(m->randsplits(SmoothTree.MSC(m, init)), sims)
+    ls = map(alg.data) do x
+        exp(logsumexp(map(y->logpdf(x,y), ys))) / length(ys)
+    end 
+    alg.h = alg.target/(alg.maxsim * mean(ls))
 end
 
 # get the prior
@@ -85,7 +98,7 @@ function ep_serial!(alg; rnd=true)
         desc = string(@sprintf("%8.3gh%4d%4d/%6d%11.3f", alg.h, i, nacc, n, ev))
         set_description(iter, desc)
         nacc, n, h, full, cavity, _ = ep_iteration(alg, i)
-        alg.h = h
+        #alg.h = h
         update!(alg, full, cavity, i, nacc/n) 
         ev = evidence(alg)
         alg.model, ev
@@ -194,20 +207,30 @@ end
 
 Tune the `h` parameter and re-evaluate accepted simulations.
 """
+#function _tuneh!(alg, n, nacc, sims)
+#    @unpack us, allsims, accsims = sims
+#    !alg.tuneh && return alg.h, nacc
+#    !(nacc < alg.target || alg.h != 1.) && return alg.h, nacc
+#    ls = first.(allsims)
+#    Ep = exp(logsumexp(ls))/n  # expected number of accepted simulations
+#    h = max(1., alg.target / (alg.maxsim * Ep))
+#    # if we did not reach the target, the new r is better for the
+#    # current set of simulations.
+#    us .-= log(h)  # re-use the random numbers but with different `r`
+#    ix = filter(i->us[i] < allsims[i][1], 1:length(allsims))
+#    sims.accsims = allsims[ix]
+#    nacc = length(sims.accsims)
+#    return h, nacc
+#end
 function _tuneh!(alg, n, nacc, sims)
     @unpack us, allsims, accsims = sims
     !alg.tuneh && return alg.h, nacc
-    !(nacc < alg.target || alg.h != 1.) && return alg.h, nacc
+#    !(nacc < alg.target || alg.h != 1.) && return alg.h, nacc
     ls = first.(allsims)
-    Ep = exp(logsumexp(ls))/n  # expected number of accepted simulations
-    h = max(1., alg.target / (alg.maxsim * Ep))
-    # if we did not reach the target, the new r is better for the
-    # current set of simulations.
-    us .-= log(h)  # re-use the random numbers but with different `r`
-    ix = filter(i->us[i] < allsims[i][1], 1:length(allsims))
-    sims.accsims = allsims[ix]
-    nacc = length(sims.accsims)
-    return h, nacc
+    Ep = exp(logsumexp(ls))/n
+    h = min(alg.h, max(1., alg.target / (alg.maxsim * Ep)))
+    alg.h = (1-alg.ν) * alg.h + alg.ν * h  # convex update
+    alg.h, nacc
 end
     
 """

@@ -141,7 +141,7 @@ convenience (interpretability).
 """
 struct MomBranchModel{T,V}
     root ::T
-    cmap ::Dict{T,Vector{V}}  # clade => natural parameter 
+    cmap ::Dict{Tuple{T,T},Vector{V}}  # clade => natural parameter 
     η0   ::Vector{V}          # natural parameter for unrepresented clade
 end
 
