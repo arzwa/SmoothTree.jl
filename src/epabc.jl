@@ -32,6 +32,7 @@ likelihood free EP) algorithm struct. See `ep!` and `pep!`.
     minacc::Int = 10
     target::Int = 500
     maxsim::Int = 1e5 
+    minsim::Int = 1e4
     h::Float64 = 1.
     ν::Float64 = 0.1
     tuneh::Bool = true
@@ -98,7 +99,6 @@ function ep_serial!(alg; rnd=true)
         desc = string(@sprintf("%8.3gh%4d%4d/%6d%11.3f", alg.h, i, nacc, n, ev))
         set_description(iter, desc)
         nacc, n, h, full, cavity, _ = ep_iteration(alg, i)
-        #alg.h = h
         update!(alg, full, cavity, i, nacc/n) 
         ev = evidence(alg)
         alg.model, ev
@@ -140,8 +140,8 @@ function ep_iteration(alg, i)
     else
         n, nacc = _inner_serial!(X, smpler, init, alg, sims)
     end
-    h, nacc = _tuneh!(alg, n, nacc, sims)
-    full, nacc = _momentmatching(alg, cavity, nacc, sims)
+    _tuneh!(alg, n, nacc, sims)
+    full = _momentmatching(alg, cavity, nacc, sims)
     return nacc, n, h, full, cavity, sims
 end
 
@@ -205,32 +205,15 @@ end
 """
     _tuneh!(...)
 
-Tune the `h` parameter and re-evaluate accepted simulations.
+Tune the `h` parameter.
 """
-#function _tuneh!(alg, n, nacc, sims)
-#    @unpack us, allsims, accsims = sims
-#    !alg.tuneh && return alg.h, nacc
-#    !(nacc < alg.target || alg.h != 1.) && return alg.h, nacc
-#    ls = first.(allsims)
-#    Ep = exp(logsumexp(ls))/n  # expected number of accepted simulations
-#    h = max(1., alg.target / (alg.maxsim * Ep))
-#    # if we did not reach the target, the new r is better for the
-#    # current set of simulations.
-#    us .-= log(h)  # re-use the random numbers but with different `r`
-#    ix = filter(i->us[i] < allsims[i][1], 1:length(allsims))
-#    sims.accsims = allsims[ix]
-#    nacc = length(sims.accsims)
-#    return h, nacc
-#end
 function _tuneh!(alg, n, nacc, sims)
+    !alg.tuneh || nacc < alg.minacc && return 
     @unpack us, allsims, accsims = sims
-    !alg.tuneh && return alg.h, nacc
-#    !(nacc < alg.target || alg.h != 1.) && return alg.h, nacc
     ls = first.(allsims)
     Ep = exp(logsumexp(ls))/n
     h = min(alg.h, max(1., alg.target / (alg.maxsim * Ep)))
     alg.h = (1-alg.ν) * alg.h + alg.ν * h  # convex update
-    alg.h, nacc
 end
     
 """
@@ -240,9 +223,9 @@ Compute the new global approximation by approximating the tilted distribution
 within the exponential family using some form of moment matching.
 """
 function _momentmatching(alg, cavity, nacc, sims)
-    nacc < alg.minacc && return alg.model, 0
+    nacc < alg.minacc && return alg.model
     full = matchmoments(last.(sims.accsims), cavity, alg.α)
-    return full, nacc
+    return full
 end
 
 #"""
