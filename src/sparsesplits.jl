@@ -37,7 +37,7 @@ Get a natural parameter SparseSplits object from split counts `d`,
 assuming the Beta-splitting Dirichlet prior with pseudo-count α and
 shape parameter `β`. 
 """
-function SparseSplits(γ, d::Dict{T,Int}, β, α) where T
+function SparseSplits(γ, d::Dict{T}, β, α) where T
     ρ = refsplit(γ)
     s = cladesize(γ) 
     ns = nsplits.(s, 1:s÷2) 

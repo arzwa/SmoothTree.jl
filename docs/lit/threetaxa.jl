@@ -147,3 +147,9 @@ savefig("docs/img/threetaxon.png")
 
 # Convergence, posterior approximation and posterior predictive
 # distribution plots
+
+
+# Importance sampler
+alg    = SmoothTree.EPABCIS(data, model, λ=0.1, α=1e-9, maxsim=1e4, target=500, miness=10)
+
+trace  = ep!(alg, 5);

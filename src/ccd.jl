@@ -87,8 +87,8 @@ CCD(trees::AbstractDict, args...) = CCD(collect(trees), args...)
 CCD(tree::Node, args...) = CCD([tree], args...)
 
 # from a vector of (pairs of) trees
-function CCD(trees, lmap)
-    ccd = initccd(lmap)
+function CCD(trees, lmap, ::Type{T}=Int64) where T
+    ccd = initccd(lmap, T)
     for tree in trees
         addtree!(ccd, tree)
     end
@@ -96,12 +96,12 @@ function CCD(trees, lmap)
 end
 
 # initialize a ccd
-function initccd(lmap::BiMap{T,V}) where {T,V}
-    cmap = Dict{T,Int64}(γ=>0 for (γ,_) in lmap)
-    smap = Dict{T,Dict{T,Int64}}()
+function initccd(lmap::BiMap{T,V}, ::Type{W}) where {T,V,W}
+    cmap = Dict{T,W}(γ=>zero(W) for (γ,_) in lmap)
+    smap = Dict{T,Dict{T,W}}()
     root = T(sum(keys(lmap)))
-    cmap[root] = 0  
-    smap[root] = Dict{T,Int64}()
+    cmap[root] = zero(W)  
+    smap[root] = Dict{T,W}()
     ccd = CCD(lmap, cmap, smap, root)
 end
 

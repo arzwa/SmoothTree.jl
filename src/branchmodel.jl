@@ -59,56 +59,66 @@ end
 # Note that each tree is associated with an (implicit) parameter
 # vector for *all* clades, so that when a clade is not in a tree, we
 # have to add a virtual draw from the cavity.
-function matchmoments(trees, cavity::BranchModel{T,V}) where {T,V}
+function matchmoments(trees, weights, cavity::BranchModel{T,V}) where {T,V}
     d = Dict{Tuple{T,T},Vector{V}}()
     # obtain moment estimates
-    for tree in trees 
-        _record_branchparams!(d, tree)
+    for (tree, w) in zip(trees, weights)
+        _record_branchparams!(d, tree, w)
     end
-    # add unrepresented prior samples (do or don't?)
-    _cavity_contribution!(d, cavity, length(trees))
+    # add unrepresented prior samples
+    _cavity_contribution!(d, cavity)
     # convert to natural parameters
-    q = Dict(γ => _mom2nat(v[2], v[3], v[1]) for (γ, v) in d)
+    q = Dict(γ => _mom2nat(v[2], v[3]) for (γ, v) in d)
+    BranchModel(cavity.root, q, cavity.η0)
+end
+
+# equally weighted (e.g. rejection sample)
+function matchmoments(trees, cavity::BranchModel{T,V}) where {T,V}
+    d = Dict{Tuple{T,T},Vector{V}}()
+    w = 1/length(trees)
+    for tree in trees
+        _record_branchparams!(d, tree, w)
+    end
+    _cavity_contribution!(d, cavity)
+    q = Dict(γ => _mom2nat(v[2], v[3]) for (γ, v) in d)
     BranchModel(cavity.root, q, cavity.η0)
 end
 
 # recursively process a tree to get the sufficient statistics for
 # branch parameters
-function _record_branchparams!(d, node)
+function _record_branchparams!(d, node, w)
     isleaf(node) && return id(node), log(distance(node))
-    left, dl = _record_branchparams!(d, node[1]) 
-    rght, dr = _record_branchparams!(d, node[2]) 
+    left, dl = _record_branchparams!(d, node[1], w) 
+    rght, dr = _record_branchparams!(d, node[2], w) 
     clade = left + rght
     if isfinite(dl)
         k = (clade, left)
         !haskey(d, k) && (d[k] = zeros(3))
-        d[k] .+= [1., dl, dl^2]
+        d[k] .+= [w, w*dl, w*dl^2]
     end
     if isfinite(dr)
         k = (clade, rght)
         !haskey(d, k) && (d[k] = zeros(3))
-        d[k] .+= [1., dr, dr^2]
+        d[k] .+= [w, w*dr, w*dr^2]
     end
     return clade, log(distance(node))
 end
 
 # add the cavity (pseudo-prior) contribution to the moment estimates
-# (for those clades which are not observed in all trees)
-function _cavity_contribution!(d, cavity, N)
+# (for those clades which are not either observed or unobserved in all trees)
+function _cavity_contribution!(d, cavity)
     for (γ, xs) in d
-        n = N - xs[1]  # number of cavity draws to 'add'
+        w = 1. - xs[1]  # number of cavity draws to 'add'
         μ, V = gaussian_nat2mom(cavity[γ]...)
-        d[γ][2] += n*μ
-        d[γ][3] += n*(V + μ^2)
-        d[γ][1] = N
+        d[γ][2] += w*μ
+        d[γ][3] += w*(V + μ^2)
     end
 end
 
 # compute moments from sufficient statistics and convert to natural
 # parameters
-function _mom2nat(xs, xsqs, N) 
-    μ = xs/N
-    V = xsqs/N - μ^2
+function _mom2nat(μ, Esq) 
+    V = Esq - μ^2
     [gaussian_mom2nat(μ, V)...]
 end
 

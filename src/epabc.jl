@@ -5,6 +5,35 @@
 
 abstract type AbstractEPABC end
 
+# abstract methods
+# get the prior
+prior(alg) = alg.sites[end]
+
+# get the cavity distribution
+getcavity(i, m, s) = isassigned(s, i) ? m - s[i] : m
+
+"""
+    ep!(alg, n; kwargs...)
+
+Do `n` serial EP passes.
+"""
+ep!(alg, n=1; kwargs...) = mapreduce(i->ep_serial!(alg; kwargs...), vcat, 1:n)
+
+"""
+    pep!(alg, n)
+
+Do `n` (embarrassingly) parallel EP passes.
+"""
+pep!(alg, n=1; kwargs...) = mapreduce(i->ep_parallel!(alg; kwargs...), vcat, 1:n)
+
+"""
+    evidence(alg)
+
+Compute the model evidence (marginal likelihood).
+"""
+evidence(alg) = sum(alg.siteC) + logpartition(alg.model) - logpartition(prior(alg))
+
+# rejection sampler à la Barthelmé & Chopin
 """
     EPABC(data, prior; kwargs...)
 
@@ -64,26 +93,6 @@ function initialize_h!(alg)
     alg.h = alg.target/(alg.maxsim * mean(ls))
 end
 
-# get the prior
-prior(alg) = alg.sites[end]
-
-# get the cavity distribution
-getcavity(i, m, s) = isassigned(s, i) ? m - s[i] : m
-
-"""
-    ep!(alg, n; kwargs...)
-
-Do `n` serial EP passes.
-"""
-ep!(alg, n=1; kwargs...) = mapreduce(i->ep_serial!(alg; kwargs...), vcat, 1:n)
-
-"""
-    pep!(alg, n)
-
-Do `n` (embarrassingly) parallel EP passes.
-"""
-pep!(alg, n=1; kwargs...) = mapreduce(i->ep_parallel!(alg; kwargs...), vcat, 1:n)
-
 """
     ep_serial!(alg; rnd=true)
 
@@ -98,7 +107,7 @@ function ep_serial!(alg; rnd=true)
     trace = map(iter) do i
         desc = string(@sprintf("%8.3gh%4d%4d/%6d%11.3f", alg.h, i, nacc, n, ev))
         set_description(iter, desc)
-        nacc, n, h, full, cavity, _ = ep_iteration(alg, i)
+        nacc, n, full, cavity, _ = ep_iteration(alg, i)
         update!(alg, full, cavity, i, nacc/n) 
         ev = evidence(alg)
         alg.model, ev
@@ -142,7 +151,7 @@ function ep_iteration(alg, i)
     end
     _tuneh!(alg, n, nacc, sims)
     full = _momentmatching(alg, cavity, nacc, sims)
-    return nacc, n, h, full, cavity, sims
+    return nacc, n, full, cavity, sims
 end
 
 """
@@ -295,17 +304,4 @@ function traceback(trace; sigdigits=3)
     θ = Dict(γ=>f(xs) for (γ, xs) in θtrace)
     return c, θ
 end
-
-evidence(alg) = sum(alg.siteC) + logpartition(alg.model) - logpartition(prior(alg))
-
-# ad hoc regularized estimate of the marginal likelihood (imputes -Inf site
-# norm factors as having value ϵ (should be < log(1/M) at least).
-function evidence(alg, ϵ)
-    Z = logpartition(alg.model) - logpartition(prior(alg))
-    for Ci in alg.siteC
-        Z += isfinite(Ci) ? Ci : ϵ
-    end
-    return Z
-end
-
 

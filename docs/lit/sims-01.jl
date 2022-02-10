@@ -24,8 +24,8 @@ end
 # (from the mgf), which is approximately exp(-E[θ])
 
 # simulate a species tree
-T = UInt32
-ntaxa = 9
+T = UInt16
+ntaxa = 20
 root = rootclade(ntaxa, T) 
 S = randtree(MomMBM(root, BetaSplitTree(-1., ntaxa)))
 l = SmoothTree.n_internal(S)
@@ -49,19 +49,22 @@ Sprior = NatMBM(CCD(unique(G), m), bsd, 100.)
 #Sprior = NatMBM(T(sum(keys(m))), bsd)
 θprior = BranchModel(root, gaussian_mom2nat([log(μ), V]))
 model = MSCModel(Sprior, θprior, m)
-alg = EPABC(data, model, prunetol=1e-5, λ=0.1, α=a, target=100, minacc=5,
-            batch=1000, maxsim=1e5, h=1e9, ν=0.2)
 
-# MAP tree under the prior
-maprior = ranking(randtree(Sprior, 10000)) 
+alg = EPABC(data, model, prunetol=1e-5, λ=0.1, α=a, target=100, minacc=5,
+            batch=1000, maxsim=1e5, h=1e4, ν=0.2)
 
 # EP
 trace = ep!(alg, 3)
-
 SmoothTree.tuneoff!(alg)
-trace = [trace; ep!(alg, 1)]
+trace = [trace; ep!(alg, 3)]
+
+alg = SmoothTree.EPABCIS(data, model, prunetol=1e-5, maxsim=50000)
+trace = ep!(alg, 2)
 
 # XXX somehow the length for the branch leading to ABC is not recorded
+
+# MAP tree under the prior
+maprior = ranking(randtree(Sprior, 10000)) 
 
 smple = ranking(randtree(alg.model.S, 10000))
 SmoothTree.topologize(S)

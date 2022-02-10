@@ -66,6 +66,15 @@ function matchmoments(trees, cavity::MSCModel{T}, α) where T
     return MSCModel(S, q, cavity.m)
 end
 
+# a weighted sample (importance sampling)
+function matchmoments(trees, weights, cavity::MSCModel{T}, α) where T
+    m = shitmap(trees[1], T)  # XXX sucks?
+    S = NatMBM(CCD(zip(trees, weights), m, Float64), cavity.S.beta, α)
+    q = matchmoments(trees, weights, cavity.q)
+    # XXX we should get the CCD and branch lengths in one pass over `trees`
+    return MSCModel(S, q, cavity.m)
+end
+
 shitmap(tree, T) = BiMap(Dict(T(id(n))=>name(n) for n in getleaves(tree)))
 # issue is that we are using the id field here (which is good here
 # internally, not in general), but `CCD` uses a taxonmap and the name
