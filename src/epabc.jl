@@ -108,7 +108,7 @@ function ep_serial!(alg; rnd=true)
         desc = string(@sprintf("%8.3gh%4d%4d/%6d%11.3f", alg.h, i, nacc, n, ev))
         set_description(iter, desc)
         nacc, n, full, cavity, _ = ep_iteration(alg, i)
-        update!(alg, full, cavity, i, nacc/n) 
+        update!(alg, full, cavity, i, log(nacc/n)) 
         ev = evidence(alg)
         alg.model, ev
     end 
@@ -258,14 +258,14 @@ end
 #    return alg.model
 #end
     
-function update!(alg, full, cavity, i, Z)
+function update!(alg, full, cavity, i, lZ)
     @unpack λ, prunetol = alg
     siteup = λ * (full - alg.model)
     prunetol != 0. && prune!(siteup, prunetol)  # should we?
     alg.sites[i] = isassigned(alg.sites, i) ? alg.sites[i] + siteup : siteup
     alg.model = alg.model + siteup
-    if Z > 0
-        alg.siteC[i] = log(Z) - logpartition(alg.model) + logpartition(cavity)
+    if isfinite(lZ)
+        alg.siteC[i] = lZ - logpartition(alg.model) + logpartition(cavity)
     end
     # I am not 100% sure about the normalizing constant -- how does this play
     # with λ? should we use the updated model or not?

@@ -65,7 +65,7 @@ function marginal_lhood(X, S, prior, rtol=1e-2)
     return log(i)
 end
 
-# this compute sthe marginal likelihood for each species tree
+# this computes the marginal likelihood for each species tree
 #allml = map(T->marginal_lhood(X, T, Normal(), 1e-2), allS)
 
 # unnormalized posterior for the relevant θ associated with S,
@@ -109,26 +109,24 @@ vline!([θ[2]], color=:black, ls=:dot)
 # EP inference
 T = UInt16
 root = T(15)
-bsd  = BetaSplitTree(-1., cladesize(root))
+bsd  = BetaSplitTree(-1.5, cladesize(root))
 Sprior = NatMBM(root, bsd)
-θprior = BranchModel(Tuple{T,T}, SmoothTree.gaussian_mom2nat([mean(prior), std(prior)^2]))
+θprior = BranchModel(root, SmoothTree.gaussian_mom2nat([mean(prior), std(prior)^2]))
 data  = MomMBM.(CCD.(Y, Ref(m)), Ref(bsd), 1e-9)
 model = MSCModel(Sprior, θprior, m)
+
 alg   = EPABC(data, model, λ=0.1, α=1e-9, target=500, minacc=100, prunetol=0.)
 trace = ep!(alg, 10);
-smple = ranking(randtree(MomMBM(trace[end].S), 10000))
+smple = ranking(randtree(MomMBM(trace[end][1].S), 10000))
 post  = alg.model
 
-xs = filter(x->size(x[2], 2) > 1, collect(X1))
-map(xs) do (k, x)
-    p1 = plot(x, title="clade $k $(bitstring(k)[end-7:end])", xscale=:log10)
-    p2 = plot(X2[k])
-    plot(p1, p2)
-end |> x-> plot(x..., size=(1200,500))
- 
-post.S.smap[root]
-c2 = (0x000f, 0x0007)
-c1 = (0x0007, 0x0003)
+# alternative
+alg = SmoothTree.EPABCIS(data, model, λ=0.1, target=4000, miness=10,
+                         maxsim=5000, prunetol=1e-9)
+istrace = ep!(alg, 10);
+trace = first.(istrace)
+smple = ranking(randtree(MomMBM(trace[end].S), 10000))
+post  = alg.model
 
 # posterior approximation for the relevant branch lengths
 lm1, V1 = SmoothTree.gaussian_nat2mom(post.q[c1])
@@ -207,7 +205,7 @@ pl4 = plot(ps4..., layout=(1,3), xticks=[1, 10, 100, 1000])
 
 plot(pl1, pl2, pl3, ps4..., layout=grid(2,3,widths=[1/3,1/3,1/3]), dpi=300)
 
-savefig("docs/img/fourtaxon.pdf")
-savefig("docs/img/fourtaxon.png")
+#savefig("docs/img/fourtaxon.pdf")
+#savefig("docs/img/fourtaxon.png")
 
 

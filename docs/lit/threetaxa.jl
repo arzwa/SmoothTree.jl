@@ -151,6 +151,6 @@ savefig("docs/img/threetaxon.png")
 
 
 # Importance sampler
-alg = SmoothTree.EPABCIS(data, model, λ=0.1, maxsim=9000, target=1000, miness=10)
-trace  = ep!(alg, 5);
+alg = SmoothTree.EPABCIS(data, model, λ=0.1, maxsim=1000, target=500, miness=10)
+trace  = ep!(alg, 10);
 

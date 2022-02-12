@@ -25,7 +25,7 @@ end
 
 # simulate a species tree
 T = UInt16
-ntaxa = 6
+ntaxa = 15
 root = rootclade(ntaxa, T) 
 S = randtree(MomMBM(root, BetaSplitTree(-1., ntaxa)))
 l = SmoothTree.n_internal(S)
@@ -50,16 +50,18 @@ Sprior = NatMBM(CCD(unique(G), m), bsd, 100.)
 θprior = BranchModel(root, gaussian_mom2nat([log(μ), V]))
 model = MSCModel(Sprior, θprior, m)
 
-alg = EPABC(data, model, prunetol=1e-5, λ=0.1, α=a, target=100, minacc=5,
-            batch=1000, maxsim=1e5, h=1e4, ν=0.2)
+#alg = EPABC(data, model, prunetol=1e-5, λ=0.1, α=a, target=100, minacc=5,
+#            batch=1000, maxsim=1e5, h=1e4, ν=0.2)
 
 # EP
-trace = ep!(alg, 3)
-SmoothTree.tuneoff!(alg)
-trace = [trace; ep!(alg, 3)]
+#trace = ep!(alg, 3)
+#SmoothTree.tuneoff!(alg)
+#trace = [trace; ep!(alg, 3)]
 
-alg = SmoothTree.EPABCIS(data, model, prunetol=1e-5, maxsim=10000, target=5000)
-trace = ep!(alg, 5)
+alg = SmoothTree.EPABCIS(data, model, prunetol=1e-5, 
+                         maxsim=10000, target=100, miness=1.1)
+
+trace = ep!(alg, 2)
 
 # XXX somehow the length for the branch leading to ABC is not recorded
 
