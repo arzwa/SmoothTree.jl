@@ -101,8 +101,7 @@ Pick a split uniformly from the set of splits of size `k` in clade `γ`.
 function randsplitofsize(γ::T, k) where T
     g = digits(γ, base=2)  # binary expansion
     n = sum(g)             # number of leaves
-    o = shuffle(1:n)[1:k]
-    sort!(o, rev=true)  
+    o = reverse!(sample(1:n, k, replace=false, ordered=true))
     # `o` records which leaves end up in left/right subclade
     # o = [a,b] means we obtain a split by taking/removing the ath and
     # bth leaf from γ. Note that this does not mean the ath and bth
@@ -127,4 +126,3 @@ function randsplitofsize(γ::T, k) where T
     left = min(splt, γ - splt)
     return left
 end
-

@@ -3,6 +3,7 @@
 # - the marginal likelihood is -Inf whenever there are data points with no
 #   accepted simulations
 
+# Kong estimator
 ess(w) = 1/sum(w .^ 2) 
 
 """

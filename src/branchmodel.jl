@@ -168,6 +168,7 @@ end
 Base.haskey(m::MomBranchModel, γ) = haskey(m.cmap, γ)
 Base.getindex(m::MomBranchModel, γ) = haskey(m, γ) ? m.cmap[γ] : m.η0
 
+
 # pruning: note that we cannot just remove those clades not in the
 # associated BMP. When we prune a BMP, we will remove for instance
 # probability 1 clades with two leaves from the smap (since they need
@@ -197,3 +198,20 @@ function logpartition(m::BranchModel)
     Z += (N-length(m.cmap)) * gaussian_logpartition(m.η0[1], m.η0[2])
     return Z
 end
+
+"""
+    logpdf(m::, splits)
+
+`splits` should be a vector of ((parentclade, subclade), branch_length) tuples.
+"""
+function logpdf(m::MomBranchModel, splits)
+    l = 0.
+    for (k,v) in splits
+        isnan(v) && continue  # irrelevant branch
+        μ, V = m[k]
+        l += logpdf(Normal(μ, √V), v)
+    end
+    return l
+end
+
+logpdf(m::BranchModel, splits) = logpdf(MomBranchModel(m), splits)

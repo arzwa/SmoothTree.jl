@@ -80,6 +80,22 @@ function _getsplits(splits, n, m)
     return a + b
 end
 
+function getsplits_with_length(tree, m::BiMap{K,V}) where {K,V}
+    splits  = Tuple{K,K}[]
+    lengths = Tuple{Tuple{K,K},Float64}[]
+    _getsplitsl(splits, lengths, tree, m)
+    return splits, lengths
+end
+function _getsplitsl(splits, lengths, n, m)
+    isleaf(n) && return m[name(n)], distance(n)
+    a, da = _getsplitsl(splits, lengths, n[1], m)
+    b, db = _getsplitsl(splits, lengths, n[2], m)
+    push!(splits, (a + b, max(a,b)))
+    push!(lengths, ((a + b, a), da))
+    push!(lengths, ((a + b, b), db))
+    return a + b, distance(n)
+end
+
 getclade(m::BiMap{T}, clade::Vector{String}) where T = 
     T(sum([m[x] for x in clade]))
 

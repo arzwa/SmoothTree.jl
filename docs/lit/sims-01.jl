@@ -25,7 +25,7 @@ end
 
 # simulate a species tree
 T = UInt16
-ntaxa = 20
+ntaxa = 6
 root = rootclade(ntaxa, T) 
 S = randtree(MomMBM(root, BetaSplitTree(-1., ntaxa)))
 l = SmoothTree.n_internal(S)
@@ -88,7 +88,7 @@ clades = map(n->(id(parent(n)), id(n)), nodes)
 pls = map(clades) do g
     p = plot(Normal(log(μ), √V), color=:lightgray,
          fill=true, fillalpha=0.8, xlim=(-4.5,4.5), yticks=false, grid=false)
-    for model in first.(trace[1:100:end])
+    for model in first.(trace[1:20:end])
         lm, VV = SmoothTree.gaussian_nat2mom(model.q[g])
         plot!(Normal(lm, √VV), color=:black)
     end

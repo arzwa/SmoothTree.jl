@@ -132,6 +132,7 @@ function randsplit(m::MomMBM, γ)
     haskey(m, γ) && !ischerry(γ) ? randsplit(m[γ]) : randsplit(m.beta, γ)
 end
 
+# we implement logpdf for both Mom/Nat
 function logpdf(m::MomMBM, splits::Vector{T}) where T<:Tuple
     ℓ = 0.
     for (γ, δ) in splits
@@ -140,8 +141,22 @@ function logpdf(m::MomMBM, splits::Vector{T}) where T<:Tuple
     return ℓ
 end
 
-function splitpdf(m::MomMBM, γ, δ)
-    haskey(m, γ) ? log(m[γ][δ]) : logpdf(m.beta, γ, δ)
+splitpdf(m::MomMBM, γ, δ) = haskey(m, γ) ? log(m[γ][δ]) : logpdf(m.beta, γ, δ)
+
+function logpdf(m::NatMBM, splits)
+    ℓ = 0.
+    for (γ, δ) in splits
+        ℓ += splitpdf(m, γ, δ)
+    end
+    return ℓ
+end
+
+function splitpdf(m::NatMBM, γ, δ) 
+    !haskey(m, γ) && return logpdf(m.beta, γ, δ)
+    x = m[γ]
+    y = exp.(collect(values(x.splits)))
+    Z = sum(y) + sum(x.k .* exp.(x.η0))
+    return m[γ][δ] - log(Z)
 end
 
 """
