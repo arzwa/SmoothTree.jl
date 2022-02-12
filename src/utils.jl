@@ -76,7 +76,7 @@ function _getsplits(splits, n, m)
     isleaf(n) && return m[name(n)]
     a = _getsplits(splits, n[1], m)
     b = _getsplits(splits, n[2], m)
-    push!(splits, (a + b, max(a,b)))
+    push!(splits, (a + b, min(a,b)))
     return a + b
 end
 
@@ -90,7 +90,7 @@ function _getsplitsl(splits, lengths, n, m)
     isleaf(n) && return m[name(n)], distance(n)
     a, da = _getsplitsl(splits, lengths, n[1], m)
     b, db = _getsplitsl(splits, lengths, n[2], m)
-    push!(splits, (a + b, max(a,b)))
+    push!(splits, (a + b, min(a,b)))
     push!(lengths, ((a + b, a), da))
     push!(lengths, ((a + b, b), db))
     return a + b, distance(n)

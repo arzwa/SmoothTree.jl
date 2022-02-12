@@ -6,6 +6,8 @@
 # Kong estimator
 ess(w) = 1/sum(w .^ 2) 
 
+# A 'particle' of the simulator. `w` is the psdf under the original sampler
+# which generated the particle.
 struct Particle{T,N,X}
     S::N  # species tree
     G::X  # gene tree
@@ -94,7 +96,7 @@ function ep_iteration(alg::EPABCIS, i)
         sims = simulate(cavity, alg.maxsim)
         ws = zeros(alg.maxsim)
     end
-    ws .+= logpdf.(Ref(X), getfield.(sims, :G))
+    ws .+= tmap(x->logpdf(X, x.G), sims)
     full, n, Z = _momentmatching(alg, cavity, sims, ws)
     return full, cavity, n, Z, sims, ess_ws
 end
