@@ -98,12 +98,12 @@ Compute the logpartition function of the MSCModel.
 """
 logpartition(model::MSCModel) = logpartition(model.S) + logpartition(model.q)
 
-# XXX too slow, mostly due to MomMBM conversion..., which is not necessary...
 """
     logpdf(model, species_tree)
 """
-function logpdf(model::MSCModel, S)
-    xs, bs = getsplits_with_length(S, model.m)
+function logpdf(model::MSCModel{T}, S) where T
+    m = shitmap(S, T)  # sucks! buggy!
+    xs, bs = getsplits_with_length(S, m)
     l = logpdf(model.S, xs) + logpdf(model.q, bs)
 end
 

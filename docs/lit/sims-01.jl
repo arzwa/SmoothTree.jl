@@ -58,8 +58,8 @@ trace = ep!(alg, 3)
 SmoothTree.tuneoff!(alg)
 trace = [trace; ep!(alg, 3)]
 
-alg = SmoothTree.EPABCIS(data, model, prunetol=1e-5, maxsim=50000)
-trace = ep!(alg, 2)
+alg = SmoothTree.EPABCIS(data, model, prunetol=1e-5, maxsim=10000, target=5000)
+trace = ep!(alg, 5)
 
 # XXX somehow the length for the branch leading to ABC is not recorded
 
@@ -88,7 +88,7 @@ clades = map(n->(id(parent(n)), id(n)), nodes)
 pls = map(clades) do g
     p = plot(Normal(log(μ), √V), color=:lightgray,
          fill=true, fillalpha=0.8, xlim=(-4.5,4.5), yticks=false, grid=false)
-    for model in first.(trace[1:20:end])
+    for model in first.(trace[1:100:end])
         lm, VV = SmoothTree.gaussian_nat2mom(model.q[g])
         plot!(Normal(lm, √VV), color=:black)
     end

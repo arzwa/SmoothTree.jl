@@ -6,6 +6,13 @@
 # Kong estimator
 ess(w) = 1/sum(w .^ 2) 
 
+struct Particle{T,N,X}
+    S::N  # species tree
+    G::X  # gene tree
+    w::T  # sampler density
+end
+
+
 """
     EPABC(data, prior; kwargs...)
 
@@ -23,7 +30,7 @@ likelihood free EP) algorithm struct. See `ep!` and `pep!`.
   Handbook of Approximate Bayesian Computation. 
   Chapman and Hall/CRC, 2018. 415-434.
 """
-@with_kw mutable struct EPABCIS{X,M} <: AbstractEPABC
+@with_kw mutable struct EPABCIS{X,M,T,V,W} <: AbstractEPABC
     data ::X
     model::M
     sites::Vector{M}
@@ -34,13 +41,16 @@ likelihood free EP) algorithm struct. See `ep!` and `pep!`.
     target::Int = 500   # target ESS
     maxsim::Int = 1e5 
     prunetol::Float64 = 1e-9
+    sims ::Vector{Particle{T,V,W}}
 end
 
-function EPABCIS(data, prior::T; kwargs...) where T
+function EPABCIS(data, prior::T; maxsim=1e5, kwargs...) where T
     sites = Vector{T}(undef, length(data)+1)
     siteC = fill(-Inf, length(data))
     sites[end] = prior  # last entry is the prior
-    alg = EPABCIS(data=data, model=prior, sites=sites, siteC=siteC; kwargs...)
+    sims = simulate(prior, maxsim)
+    alg = EPABCIS(data=data, model=prior, sites=sites, siteC=siteC, 
+                  maxsim=maxsim, sims=sims; kwargs...)
     return alg
 end
 
@@ -53,11 +63,12 @@ random order.
 function ep_serial!(alg::EPABCIS; rnd=true) 
     rnge = rnd ? shuffle(1:length(alg.data)) : 1:length(alg.data)
     iter = ProgressBar(rnge)
-    ev = n = -Inf
+    ev = n = ess_ws = -Inf
     trace = map(iter) do i
-        desc = string(@sprintf("ESS = %8.1f; Z = %9.3f", n, ev))
+        desc = string(@sprintf("%8.1f; %8.1f; %9.3f", ess_ws, n, ev))
         set_description(iter, desc)
-        full, cavity, n, Z = ep_iteration(alg, i)
+        full, cavity, n, Z, sims, ess_ws = ep_iteration(alg, i)
+        alg.sims = sims
         update!(alg, full, cavity, i, Z) 
         ev = evidence(alg)
         alg.model, ev, n
@@ -65,49 +76,55 @@ function ep_serial!(alg::EPABCIS; rnd=true)
     prune!(alg)
     return trace
 end
- 
+
 """
     ep_iteration(alg, i)
 
-Do a single EP site update.
+Do a single EP site update with recycling of simulations.
 """
 function ep_iteration(alg::EPABCIS, i)
-    @unpack model, sites, λ, α, miness, target, maxsim = alg
+    @unpack model, sites, λ, α, miness, target, maxsim, sims = alg
     X = alg.data[i]
     cavity = getcavity(i, model, sites)
-    smpler = MSCSampler(cavity)
-    sptree = randtree(smpler)
-    init = idinit(sptree)
-    sims = _inner_threaded(X, smpler, init, alg)
-    full, n, Z = _momentmatching(alg, cavity, sims)
-    return full, cavity, n, Z
+    ws = logweights(sims, cavity)
+    Ws = exp.(ws)
+    Ws /= sum(Ws)  # normalized weights
+    ess_ws = ess(Ws)
+    if ess_ws < alg.target  # fresh simulations required
+        sims = simulate(cavity, alg.maxsim)
+        ws = zeros(alg.maxsim)
+    end
+    ws .+= logpdf.(Ref(X), getfield.(sims, :G))
+    full, n, Z = _momentmatching(alg, cavity, sims, ws)
+    return full, cavity, n, Z, sims, ess_ws
 end
 
-"""
-    _inner_threaded(...)
-
-See `_inner_serial`, but in a multi-threaded implementation using a
-user-defined batch size for simulation batches executed in parallel.
-"""
-function _inner_threaded(X, smpler, init, alg)
-    tmap(_->simfun(smpler, init, X), 1:alg.maxsim)
+function simulate(model, n)
+    smpler = MSCSampler(model)
+    init = idinit(randtree(smpler))
+    tmap(_->simfun(model, smpler, init), 1:n)
 end
 
-function simfun(smpler, init, X)
+function simfun(model, smpler, init)
     S = randtree(smpler)
+    l = logpdf(model, S)
     G = randsplits(MSC(S, init))
-    l = logpdf(X, G)
-    (l, S)
+    return Particle(S, G, l)
 end
 
-function _momentmatching(alg::EPABCIS, cavity, sims)
+function logweights(particles, model)
+    tmap(p->logpdf(model, p.S) - p.w, particles)
+end
+
+function _momentmatching(alg::EPABCIS, cavity, sims, lws)
     # importance weights
-    w = exp.(first.(sims))
+    w = exp.(lws)  # input are log weights
     W = w / sum(w)
     Z = mean(w)
     n = ess(W)
     n < alg.miness && return alg.model, n, Z
-    trees = last.(sims)
+    trees = getfield.(sims, :S)
     full = matchmoments(trees, W, cavity, alg.α)
     return full, n, Z
 end
+

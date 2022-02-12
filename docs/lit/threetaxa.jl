@@ -107,6 +107,7 @@ model  = MSCModel(Sprior, q, m)
 alg    = EPABC(data, model, λ=0.1, α=1e-9, maxsim=1e5, target=500, minacc=100)
 
 trace  = ep!(alg, 10);
+
 smple  = ranking(randtree(MomMBM(alg.model.S), 10000))
 relabel(first(smple)[1], m)
 
@@ -150,6 +151,6 @@ savefig("docs/img/threetaxon.png")
 
 
 # Importance sampler
-alg    = SmoothTree.EPABCIS(data, model, λ=0.1, α=1e-9, maxsim=1e4, target=500, miness=10)
-
+alg = SmoothTree.EPABCIS(data, model, λ=0.1, maxsim=9000, target=1000, miness=10)
 trace  = ep!(alg, 5);
+

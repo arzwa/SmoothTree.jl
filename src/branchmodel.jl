@@ -204,14 +204,16 @@ end
 
 `splits` should be a vector of ((parentclade, subclade), branch_length) tuples.
 """
-function logpdf(m::MomBranchModel, splits)
+function logpdf(m::BranchModel, splits)
     l = 0.
     for (k,v) in splits
-        isnan(v) && continue  # irrelevant branch
-        μ, V = m[k]
-        l += logpdf(Normal(μ, √V), v)
+        !isfinite(v) && continue  # irrelevant branch
+        μ, V = gaussian_nat2mom(m[k])
+        if isnan(V)  # happens...
+            μ, V = gaussian_nat2mom(m.η0)
+        end
+        l += logpdf(Normal(μ, √V), log(v))
     end
     return l
 end
 
-logpdf(m::BranchModel, splits) = logpdf(MomBranchModel(m), splits)
