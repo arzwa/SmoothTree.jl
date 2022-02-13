@@ -1,15 +1,11 @@
-# assumed throughout
-_spname(x::String) = string(split(x, "_")[1])
-_spname(n::Node) = _spname(name(n))
-
 # the number of possible splits of a set of size n
-_ns(n) = 2^(n-1) - 1
+nsplits(n) = 2^(n-1) - 1
+
+# number of rooted trees with n taxa
+ntrees(n) = prod([2i-3 for i=3:n])
 
 # ranking
 ranking(xs) = sort(collect(proportionmap(xs)), by=last, rev=true)
-
-# ntrees
-ntrees(n) = prod([2i-3 for i=3:n])
 
 # remove branch lengths
 topologize(tree) = topologize!(deepcopy(tree))
@@ -44,7 +40,6 @@ Base.haskey(m::BiMap{T,V}, k::V) where {T,V} = haskey(m.m2, k)
 Base.iterate(m::BiMap) = Base.iterate(m.m1)
 Base.iterate(m::BiMap, i) = Base.iterate(m.m1, i)
 
-# because why not
 function Base.show(io::IO, m::BiMap{T,V}) where {T,V} 
     write(io, "$(typeof(m)) with $(length(m.m1)) entries:")
     for (k,v) in m.m1
@@ -52,48 +47,19 @@ function Base.show(io::IO, m::BiMap{T,V}) where {T,V}
     end
 end
 
-# a taxonmap
-taxonmap(tree::Node{T}) where T = taxonmap(name.(getleaves(tree)), T)
-taxonmap(tree, T) = taxonmap(name.(getleaves(tree)), T)
-taxonmap(trees::AbstractDict) = taxonmap(collect(keys(trees)))
-taxonmap(trees::Vector{<:Node{T}}) where T = taxonmap(trees, T)
+# a clademap
+clademap(tree::Node{T}) where T = clademap(name.(getleaves(tree)), T)
+clademap(tree, T) = clademap(name.(getleaves(tree)), T)
+clademap(trees::AbstractDict) = clademap(collect(keys(trees)))
+clademap(trees::Vector{<:Node{T}}) where T = clademap(trees, T)
 
-function taxonmap(trees::Vector{<:Node}, T)
-    taxonmap(unique(mapreduce(x->name.(getleaves(x)), vcat, trees)), T)
+function clademap(trees::Vector{<:Node}, T)
+    clademap(unique(mapreduce(x->name.(getleaves(x)), vcat, trees)), T)
 end
 
-function taxonmap(l::Vector{String}, T=UInt16)
+function clademap(l::Vector{String}, T=UInt16)
     d = Dict(T(2^i)=>l[i+1] for i=0:length(l)-1)
     return BiMap(d)
-end
-
-function getsplits(tree, m::BiMap{K,V}) where {K,V}
-    splits = Tuple{K,K}[]
-    _getsplits(splits, tree, m)
-    return splits
-end
-function _getsplits(splits, n, m)
-    isleaf(n) && return m[name(n)]
-    a = _getsplits(splits, n[1], m)
-    b = _getsplits(splits, n[2], m)
-    push!(splits, (a + b, min(a,b)))
-    return a + b
-end
-
-function getsplits_with_length(tree, m::BiMap{K,V}) where {K,V}
-    splits  = Tuple{K,K}[]
-    lengths = Tuple{Tuple{K,K},Float64}[]
-    _getsplitsl(splits, lengths, tree, m)
-    return splits, lengths
-end
-function _getsplitsl(splits, lengths, n, m)
-    isleaf(n) && return m[name(n)], distance(n)
-    a, da = _getsplitsl(splits, lengths, n[1], m)
-    b, db = _getsplitsl(splits, lengths, n[2], m)
-    push!(splits, (a + b, min(a,b)))
-    push!(lengths, ((a + b, a), da))
-    push!(lengths, ((a + b, b), db))
-    return a + b, distance(n)
 end
 
 getclade(m::BiMap{T}, clade::Vector{String}) where T = 
@@ -194,7 +160,7 @@ function readtrees(path)
 end
 
 # Tree comparison etc.
-getcladesbits(tree, T=UInt16) = getcladesbits(tree, taxonmap(tree))
+getcladesbits(tree, T=UInt16) = getcladesbits(tree, clademap(tree))
 
 # get clades as bitstrings
 function getcladesbits(tree, m::BiMap{T,V}) where {T,V}

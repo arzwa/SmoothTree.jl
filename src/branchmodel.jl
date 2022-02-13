@@ -50,6 +50,7 @@ gaussian_nat2mom(η::Vector) = [-η[1]/(2η[2]), -1.0/(2η[2])]
 gaussian_mom2nat(θ::Vector) = [θ[1]/θ[2], -1.0/(2θ[2])]
 
 # draw a random Gaussian number from natural parameterization
+randgaussian_nat(η) = randgaussian_nat(η[1], η[2])
 function randgaussian_nat(η1, η2) 
     μ, V = gaussian_nat2mom(η1, η2)
     return μ + √(V) * randn()

@@ -7,8 +7,8 @@
 """
     BetaSplitTree(β, n)
 
-Stores the relevant pmf's for a Beta-splitting Markov branching model
-on cladograms.
+Stores the relevant pmf's for a Beta-splitting Markov branching model on
+cladograms.
 
 - `β` ∈ (-2, Inf]: the shape parameter (β → -2.0 gives comb tree with
   probability one, β=-1.5 gives PDA, β=-1 gives AB, β=0 gives Yule,

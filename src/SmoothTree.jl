@@ -5,36 +5,22 @@ using Printf, ProgressBars, SpecialFunctions, ThreadTools
 import Distributions: logpdf
 export CCD, MSC, randtree, randsplits, setdistance!, setdistance_internal!
 export NatMBM, MomMBM, MSCModel, BranchModel, traceback, ep!, pep!, EPABC
-export ranking, taxonmap, BetaSplitTree, cladesize, splitsize, rootclade
+export ranking, clademap, BetaSplitTree, cladesize, splitsize, rootclade
 export relabel, gaussian_mom2nat
 
+include("trees.jl")
 include("utils.jl")
 include("betasplit.jl")
 include("ccd.jl")
+include("locus.jl")
 include("msc.jl")
 include("sparsesplits.jl")
 include("mbm.jl")
-include("branchmodel.jl")
-include("mscmodel.jl")
-include("epabc.jl")
-include("epabc-is.jl")
+include("branchmodel_.jl")
+include("mscmodel_.jl")
+include("epabc_.jl")
+#include("epabc-is.jl")
 include("pps.jl")
-
-# this function sets up the main style of analysis
-# note that h is the smoothing parameter for the input data
-function epabc(data, tmap; β=-1.5, a=0., μ=1., V=2., kwargs...)
-    T = keytype(tmap)
-    ntax = length(tmap)
-    root = T(sum(keys(tmap)))
-    bsd  = BetaSplitTree(β, ntax)
-    if a > 0.
-        data = MomMBM.(data, Ref(bsd), a)
-    end
-    Sprior = NatMBM(root, bsd)
-    θprior = BranchModel(root, gaussian_mom2nat([log(μ), V]))
-    model = MSCModel(Sprior, θprior, tmap)
-    alg = EPABC(data, model; kwargs...)
-end
 
 end # module
 

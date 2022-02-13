@@ -94,6 +94,9 @@ end
 # randtree for moment parameters
 randtree(model::MomMBM) = _randwalk(Node(model.root), model)
 
+# generic extension of randtree (also works for MSC)
+randtree(model, n) = map(_->randtree(model), 1:n)
+
 # randtree for natural parameter SparseSplits  # FIXME? 
 # I guess no need to fix this, but we should take this into account in
 # the EP algorithm by only converting the cavity once to moment space
@@ -132,6 +135,11 @@ function randsplit(m::MomMBM, γ)
     haskey(m, γ) && !ischerry(γ) ? randsplit(m[γ]) : randsplit(m.beta, γ)
 end
 
+function randsplit(m::NatMBM, γ)
+    # a cherry clade has NaN entries in SparseSplits
+    haskey(m, γ) && !ischerry(γ) ? randsplit(nat2mom(m[γ])) : randsplit(m.beta, γ)
+end
+
 # we implement logpdf for both Mom/Nat
 function logpdf(m::MomMBM, splits::Vector{T}) where T<:Tuple
     ℓ = 0.
@@ -143,7 +151,7 @@ end
 
 splitpdf(m::MomMBM, γ, δ) = haskey(m, γ) ? log(m[γ][δ]) : logpdf(m.beta, γ, δ)
 
-function logpdf(m::NatMBM, splits)
+function logpdf(m::NatMBM, splits::Splits)
     ℓ = 0.
     for (γ, δ) in splits
         ℓ += splitpdf(m, γ, δ)

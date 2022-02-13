@@ -59,9 +59,9 @@ default_init(S, tmap::BiMap) = Dict(id(n)=>[tmap[name(n)]] for n in getleaves(S)
 
 MSC(S, tmap::BiMap) = MSC(S, default_init(S, tmap))
 
-# non-recursive version -- takes the same amount of time and has
-# exactly the same amount of allocations... (recursive version seems
-# even to have a slight edge)>
+# non-recursive version -- takes the same amount of time and has exactly the
+# same amount of allocations... (recursive version seems even to have a slight
+# edge, because it doesn't have to store the states at internal nodes I guess)
 function randsplits2(model::MSC{T}, order) where T
     @unpack tree, init = model
     splits = Splits{T}()
@@ -100,7 +100,7 @@ function _censoredcoalsplits!(splits, t, lineages)
         c1 = pop!(lineages)
         c2 = pop!(lineages)
         γ = c1 + c2
-        δ = c1 < c2 ? c1 : c2 
+        δ = min(c1, c2) 
         push!(splits, (γ, δ))
         push!(lineages, γ)
         k = length(lineages)
@@ -110,6 +110,6 @@ function _censoredcoalsplits!(splits, t, lineages)
 end
 
 # get a random tree from the MSC, *as a tree data structure*
-randtree(model::MSC, lmap::AbstractDict) = treefromsplits(randsplits(model), lmap)
+randtree(model::MSC, lmap::AbstractDict) = gettree(randsplits(model), lmap)
 randtree(model::MSC, lmap::AbstractDict, n) = map(_->randtree(model, lmap), 1:n)
 
