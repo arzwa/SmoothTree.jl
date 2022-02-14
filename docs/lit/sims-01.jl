@@ -25,12 +25,13 @@ end
 
 # simulate a species tree
 T = UInt16
-ntaxa = 15
+ntaxa = 8
 root = rootclade(ntaxa, T) 
 S = randtree(MomMBM(root, BetaSplitTree(-1., ntaxa)))
 l = SmoothTree.n_internal(S)
-θ = rand(Gamma(4., 1/2), l)
-SmoothTree.setdistance_internal!(S, θ)
+#θ = rand(Gamma(4., 1/2), l)
+#SmoothTree.setdistance_internal!(S, θ)
+SmoothTree.setdistance!(S, 1.)
 m = taxonmap(S, T)
 d = getcladeθ(S, m)
 
@@ -59,9 +60,9 @@ model = MSCModel(Sprior, θprior, m)
 #trace = [trace; ep!(alg, 3)]
 
 alg = SmoothTree.EPABCIS(data, model, prunetol=1e-5, 
-                         maxsim=10000, target=100, miness=1.1)
+                         maxsim=9000, target=2000, miness=5.)
 
-trace = ep!(alg, 2)
+trace = ep!(alg, 5)
 
 # XXX somehow the length for the branch leading to ABC is not recorded
 

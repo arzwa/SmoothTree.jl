@@ -116,7 +116,7 @@ function _randwalk(node, model::MomMBM)
     return node
 end
 
-function randsplits(model::MomMBM{T}) where T
+function randsplits(model::AbstractMBM{T}) where T
     _randsplits(Tuple{T,T}[], model.root, model)
 end
 

@@ -5,7 +5,12 @@ using Pkg; Pkg.activate(@__DIR__)
 using SmoothTree, NewickTree, Distributions
 
 # The species tree topology we will use:
-S = nw"(A,(B,((C,D),(E,F))));"
+species = string.('A':'N')
+spmap = clademap(species, UInt64)
+root = sum(keys(spmap))
+ntaxa = length(spmap)
+S = randtree(NatMBM(root, BetaSplitTree(-1., ntaxa)))
+S = relabel(S, spmap)
 
 # We set some random branch lengths
 l = SmoothTree.n_internal(S)
@@ -13,8 +18,6 @@ l = SmoothTree.n_internal(S)
 SmoothTree.setdistance_internal!(S, θ)
 
 # We need a map associating with each clade its name. 
-spmap = SmoothTree.clademap(S)
-ntaxa = length(spmap)
 
 # simulate gene trees
 M = SmoothTree.MSC(S, spmap)
@@ -27,7 +30,6 @@ ranking(G)
 data = SmoothTree.Locus.(G, Ref(spmap), 1/(2^ntaxa -1), -1.)
 
 # use a Beta-splitting prior
-root = UInt16(2^ntaxa-1)
 Sprior = NatMBM(root, BetaSplitTree(-1., ntaxa))
 
 # branch length prior
@@ -37,12 +39,14 @@ Sprior = NatMBM(root, BetaSplitTree(-1., ntaxa))
 # the species tree model
 model = MSCModel(Sprior, θprior)
 
-alg = SmoothTree.EPABCIS(data, model, 10000, target=1000, miness=5., prunetol=1e-5)
+alg = SmoothTree.EPABCIS(data, model, 10000, target=5000, miness=5., prunetol=1e-5)
 
-trace = ep!(alg, 3)
+trace = ep!(alg, 2)
 
 # Take a sample from the posterior approximation
 relabel.(randtree(alg.model.S, 10000), Ref(spmap)) |> ranking
+
+SmoothTree.topologize(S)
 
 # now look at the branch approximation for the relevant tree
 using Distributions, Plots, StatsPlots

@@ -7,6 +7,9 @@
 
 # NewickTree tree, default type
 const DefaultNode{T} = Node{T,NewickData{Float64,String}}
+const SimpleNode{T} = Node{T,Float64}
+NewickTree.distance(n::SimpleNode) = n.data
+NewickTree.name(n::SimpleNode) = n.id
 
 """
     Splits{T}
@@ -37,8 +40,8 @@ A vector representation of a phylogenetic tree (with `Float64` branch lengths).
 const Branches{T} = Vector{Tuple{T,T,Float64}}
 
 function getbranches(n::DefaultNode{T}, m::AbstractDict) where {T}
-    branches = Branches{T}
-    _getbranches(branches, tree, m)
+    branches = Branches{T}()
+    _getbranches(branches, n, m)
     return branches
 end
 
@@ -46,9 +49,13 @@ function _getbranches(branches, n, m)
     isleaf(n) && return m[name(n)], distance(n)
     a, da = _getbranches(branches, n[1], m)
     b, db = _getbranches(branches, n[2], m)
-    push!(branches, ((a + b, a), da))
-    push!(branches, ((a + b, b), db))
+    push!(branches, (a + b, a, da))
+    push!(branches, (a + b, b, db))
     return a + b, distance(n)
+end
+
+function getbranchdict(n, m)
+    Dict((x[1],x[2])=>x[3] for x in getbranches(n, m))
 end
 
 # obtain a tree from a split set
