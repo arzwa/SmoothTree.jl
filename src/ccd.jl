@@ -52,14 +52,11 @@ rootclade(n, T=UInt64) = T(2^n - 1)
 ccp(ccd::CCD, γ, δ) = ccd[γ,δ] / ccd[γ]
 logccp(ccd, γ, δ) = log(ccd[γ,δ]) - log(ccd[γ])
 
-# uniform weights for a given vector of elements 
-uweights(xs) = fill(1/length(xs), length(xs))
-
 
 # Constructors
 # ------------
 # from a countmap
-CCD(trees::AbstractDict, args...) = CCD(collect(trees), args...)
+CCD(trees::AbstractDict, lmap, ::Type{T}) where T = CCD(collect(trees), lmap, T)
 
 # For a single tree
 CCD(tree::Node, args...) = CCD([tree], args...)

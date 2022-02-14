@@ -23,6 +23,15 @@ Base.:*(x::MSCModel, a) = MSCModel(x.S * a, x.q * a)
 Base.:*(a, x::MSCModel) = MSCModel(x.S * a, x.q * a)
 
 # efficiency of randtree/randbranches is similar
+# randtree somewhat less efficient, but for larger models with more represented
+# splits the difference is negligible, for instance
+# julia> @btime randtree(alg.model);
+#  114.373 μs (203 allocations: 122.53 KiB)
+# julia> @btime randbranches(alg.model);
+#  113.998 μs (129 allocations: 119.28 KiB)
+# since working with trees is more elegant than the branches/splits structs,
+# perhaps we should? The coalescent sims are also marginally faster in the tree
+# case...
 function randtree(model::MSCModel)
     tree = Node(model.S.root, Inf)
     _randtree(tree, model.S.root, model)
@@ -34,14 +43,17 @@ function _randtree(node, γ, model)
     rght = γ - left
     dl = randbranch(model.q, γ, left)
     dr = randbranch(model.q, γ, rght)
-    push!(node, Node(left, dl))
-    push!(node, Node(rght, dr))
-    _randtree(node[1], left, model)
-    _randtree(node[2], rght, model)
+    nl = Node(left, dl, node)
+    nr = Node(rght, dr, node)
+    _randtree(nl, left, model)
+    _randtree(nr, rght, model)
     return node
 end
+# NewickTree.distance(n::Node{<:Integer,Float64}) = n.data
+# NewickTree.name(n::Node{<:Integer,Float64}) = n.id
 
 # simulate a species tree from the MSCModel
+# speed-up by pre-allocating and indexing, not pushing to en empty array?
 function randbranches(model::MSCModel{T,V}) where {T,V}
     branches = Branches{T}()
     _randbranches(branches, model.S.root, model)
@@ -60,20 +72,18 @@ function _randbranches(branches, γ, model)
     return branches
 end
 
-randbranch(q::BranchModel, γ, δ) = exp(randgaussian_nat(q[(γ, δ)]))
-
 # simulate a gene tree from species tree branches
-# XXX this is dangerous since it modifies init! init should be read only...
-# else multithreading would be messed up!
 function randsplits(branches::Branches{T}, init::V) where {T,V}
     root = branches[1][1]
     splits = Splits{T}()
-    inner = V()
+    inner = V()  # NOTE we cannot modify init -- messes with threads!
     for i=length(branches):-2:1
         γ, δ1, θ1 = branches[i]
         γ, δ2, θ2 = branches[i-1]
-        l1 = isleafclade(δ1) ? init[δ1] : inner[δ1]
-        l2 = isleafclade(δ2) ? init[δ2] : inner[δ2]
+        # note, the copy is necessary here in case there are multiple lineages
+        # in a tip branch... because _censoredcoalsplits modifies l1, l2...
+        l1 = isleafclade(δ1) ? copy(init[δ1]) : inner[δ1]
+        l2 = isleafclade(δ2) ? copy(init[δ2]) : inner[δ2]
         left, splits = _censoredcoalsplits!(splits, θ1, l1)
         rght, splits = _censoredcoalsplits!(splits, θ2, l2)
         inner[γ] = vcat(left, rght)
@@ -105,11 +115,11 @@ logpartition(model::MSCModel) = logpartition(model.S) + logpartition(model.q)
 """
 function logpdf(model::MSCModel, branches::Branches)
     l = 0.
-    for i=length(branches):-2:1
+    for i=1:2:length(branches)
         γ, δ, d = branches[i]
         l += splitpdf(model.S, γ, min(γ-δ, δ))
         l += logpdf(model.q, γ, δ, d)
-        γ, δ, d = branches[i-1]
+        γ, δ, d = branches[i+1]
         l += logpdf(model.q, γ, δ, d)
     end
     return l

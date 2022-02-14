@@ -237,7 +237,7 @@ function reftree(x::T) where T
         isleafclade(x) && return 
         a = refsplit(x)
         b = x - a
-        push!(splits, (x, a))
+        push!(splits, (x, min(a,b)))
         walk(a)
         walk(b)
     end

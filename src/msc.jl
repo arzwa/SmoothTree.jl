@@ -91,6 +91,9 @@ function _coalsplits(n, splits, states)
 end
     
 # simulate a censored Kingman coalescent and store splits  
+# XXX this modifies `lineages`! This could mess with our initialization
+# dictionaries when dealing with multiple lineages in a leaf branch if we're
+# not careful
 function _censoredcoalsplits!(splits, t, lineages)
     k = length(lineages)
     k <= 1 && return lineages, splits

@@ -15,6 +15,9 @@ struct Locus{D,T,V}
     init::Dict{T,Vector{T}}       # species tree taxa => extant gene tree clades map
 end
 
+Base.length(x::Locus) = length(x.lmap)
+Base.show(io::IO, x::Locus{D}) where D = write(io, "Locus $((length(x), D))")
+
 """
     Locus(trees, spmap)
 
@@ -50,7 +53,7 @@ associate genes with species (to initialize coalescent simulations mainly).
 getmaps(trees::Vector, spmap) = getmaps(first(trees), spmap)
 
 function getmaps(tree::Node, spmap::BiMap{T,V}) where {T,V}
-    genes = name.(getleaves(tree))
+    genes = sort(name.(getleaves(tree)))
     lmap = clademap(genes, T)
     init = Dict(x=>T[] for x in keys(spmap))
     for gene in genes

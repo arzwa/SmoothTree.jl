@@ -49,6 +49,9 @@ gaussian_mom2nat(μ , V ) = (μ/V, -1.0/(2V))
 gaussian_nat2mom(η::Vector) = [-η[1]/(2η[2]), -1.0/(2η[2])]
 gaussian_mom2nat(θ::Vector) = [θ[1]/θ[2], -1.0/(2θ[2])]
 
+# a random branch length from the model
+randbranch(q::BranchModel, γ, δ) = exp(randgaussian_nat(q[(γ, δ)]))
+
 # draw a random Gaussian number from natural parameterization
 randgaussian_nat(η) = randgaussian_nat(η[1], η[2])
 function randgaussian_nat(η1, η2) 
@@ -90,7 +93,7 @@ end
 function cavity_contribution!(d, cavity)
     for (γ, xs) in d
         w = 1. - xs[1]  # number of cavity draws to 'add'
-        μ, V = gaussian_nat2mom(cavity[γ]...)
+        μ, V = gaussian_nat2mom(cavity[γ])
         d[γ][2] += w*μ
         d[γ][3] += w*(V + μ^2)
     end
@@ -114,7 +117,7 @@ gaussian_logpartition(η1, η2) = -η1^2/4η2 - 0.5log(-2η2)
 
 function logpartition(m::BranchModel)
     n = cladesize(m.root)
-    N = 3^n - 2^(n+1) + 1
+    N = 3^n - 2^(n+1) + 1  # total number of parameters 
     Z = 0.
     for (k, v) in m.cmap
         Z += gaussian_logpartition(v[1], v[2])
