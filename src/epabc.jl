@@ -1,16 +1,16 @@
-# issues:
-# - the adaptive strategy could probably be optimized further...
-# - the marginal likelihood is -Inf whenever there are data points with no
-#   accepted simulations
+abstract type SiteUpdateAlgorithm end
 
-abstract type AbstractEPABC end
-
-# abstract methods
-# get the prior
-prior(alg) = alg.sites[end]
-
-# get the cavity distribution
-getcavity(i, m, s) = isassigned(s, i) ? m - s[i] : m
+# EPABC in general
+# ----------------
+@with_kw mutable struct EPABC{A,Y,M} 
+    data::Y  # data
+    model::M  # global approximation
+    sites::Vector{M}  # site approximations
+    siteC::Vector{Float64}  # site normalization constants
+    siteupdate::A  # site update algorithm
+    λ::Float64 = 0.1  # for damped updates
+    prunetol::Float64 = 1e-9  # prune low probability splits
+end
 
 """
     ep!(alg, n; kwargs...)
@@ -19,245 +19,24 @@ Do `n` serial EP passes.
 """
 ep!(alg, n=1; kwargs...) = mapreduce(i->ep_serial!(alg; kwargs...), vcat, 1:n)
 
-"""
-    pep!(alg, n)
+# compute the model evidence
+evidence(alg) = sum(alg.siteC) + logpartition(alg.model) - logpartition(getprior(alg))
 
-Do `n` (embarrassingly) parallel EP passes.
-"""
-pep!(alg, n=1; kwargs...) = mapreduce(i->ep_parallel!(alg; kwargs...), vcat, 1:n)
+# get the cavity wrt index i
+getcavity(alg, i) = isassigned(alg.sites, i) ? alg.model - alg.sites[i] : alg.model
 
-"""
-    evidence(alg)
+# get the prior
+getprior(alg) = alg.sites[end]
 
-Compute the model evidence (marginal likelihood).
-"""
-evidence(alg) = sum(alg.siteC) + logpartition(alg.model) - logpartition(prior(alg))
-
-# rejection sampler à la Barthelmé & Chopin
-"""
-    EPABC(data, prior; kwargs...)
-
-Expectation-propagation approximate Bayesian computation (EP-ABC, or
-likelihood free EP) algorithm struct. See `ep!` and `pep!`.
-
-## References
-- Barthelmé, Simon, and Nicolas Chopin. 
-  "Expectation propagation for likelihood-free inference." 
-  Journal of the American Statistical Association 
-  109.505 (2014): 315-333.
-- Barthelmé, Simon, Nicolas Chopin, and Vincent Cottet. 
-  "Divide and conquer in ABC: Expectation-propagation algorithms 
-  for likelihood-free inference." 
-  Handbook of Approximate Bayesian Computation. 
-  Chapman and Hall/CRC, 2018. 415-434.
-"""
-@with_kw mutable struct EPABC{X,M} <: AbstractEPABC
-    data ::X
-    model::M
-    sites::Vector{M}
-    siteC::Vector{Float64}
-    λ::Float64 = 0.1    # for damped update...
-    α::Float64 = 1e-16  # Dirichlet-MBM parameter for 'moment matching'
-    minacc::Int = 10
-    target::Int = 500
-    maxsim::Int = 1e5 
-    minsim::Int = 1e4
-    h::Float64 = 1.
-    ν::Float64 = 0.1
-    tuneh::Bool = true
-    batch::Int = 1
-    prunetol::Float64 = 1e-9
+# prune the model and site approximations
+function prune!(alg)
+    @unpack prunetol, sites = alg
+    prunetol == 0. && return
+    map(i->isassigned(sites, i) && prune!(sites[i], prunetol), 1:length(sites))
+    alg.model = reduce(+, sites)
 end
 
-function tuneoff!(alg)
-    alg.h = 1.
-    alg.tuneh = false
-end
-
-function EPABC(data, prior::T; kwargs...) where T
-    sites = Vector{T}(undef, length(data)+1)
-    siteC = fill(-Inf, length(data))
-    sites[end] = prior  # last entry is the prior
-    alg = EPABC(data=data, model=prior, sites=sites, siteC=siteC; kwargs...)
-    return alg
-end
-
-# get an initial estimate for `h`
-function initialize_h!(alg)
-    sims = randtree(alg.model, alg.maxsim)    
-    init = idinit(sims[1])
-    ys = map(m->randsplits(SmoothTree.MSC(m, init)), sims)
-    ls = map(alg.data) do x
-        exp(logsumexp(map(y->logpdf(x,y), ys))) / length(ys)
-    end 
-    alg.h = alg.target/(alg.maxsim * mean(ls))
-end
-
-"""
-    ep_serial!(alg; rnd=true)
-
-Serial EP pass. When `rnd=true` the pass goes over the data in a
-random order. 
-"""
-function ep_serial!(alg; rnd=true) 
-    rnge = rnd ? shuffle(1:length(alg.data)) : 1:length(alg.data)
-    iter = ProgressBar(rnge)
-    nacc = n = 0
-    ev = -Inf
-    trace = map(iter) do i
-        desc = string(@sprintf("%8.3gh%4d%4d/%6d%11.3f", alg.h, i, nacc, n, ev))
-        set_description(iter, desc)
-        nacc, n, full, cavity, _ = ep_iteration(alg, i)
-        update!(alg, full, cavity, i, log(nacc/n)) 
-        ev = evidence(alg)
-        alg.model, ev
-    end 
-    prune!(alg)
-    return trace
-end
-
-# a helper struct for storing the EP inner iteration simulations
-mutable struct Simulations{S,T}
-    accsims::Vector{Tuple{T,S}}
-    allsims::Vector{Tuple{T,S}}
-    us::Vector{T}
-end
-
-function Simulations(S)
-    accsims = Tuple{Float64,S}[]
-    allsims = Tuple{Float64,S}[]
-    Simulations(accsims, allsims, Float64[])
-end
-
-idinit(tree) = Dict(id(n)=>[id(n)] for n in getleaves(tree))
-    
-"""
-    ep_iteration(alg, i)
-
-Do a single EP site update.
-"""
-function ep_iteration(alg, i)
-    @unpack model, sites, λ, α, minacc, target, maxsim, tuneh = alg
-    X = alg.data[i]
-    cavity = getcavity(i, model, sites)
-    smpler = MSCSampler(cavity)
-    sptree = randtree(smpler)
-    init = idinit(sptree)
-    sims = Simulations(eltype(smpler))
-    if alg.batch > 1 && Threads.nthreads() > 1
-        n, nacc = _inner_threaded!(X, smpler, init, alg, sims)
-    else
-        n, nacc = _inner_serial!(X, smpler, init, alg, sims)
-    end
-    _tuneh!(alg, n, nacc, sims)
-    full = _momentmatching(alg, cavity, nacc, sims)
-    return nacc, n, full, cavity, sims
-end
-
-"""
-    _inner_serial!(...)
-
-This is in the ABC simulation algorithm within the EP site update (see Bartelmé
-& Chopin), implemented in a serial fashion.
-"""
-function _inner_serial!(X, smpler, init, alg, sims)
-    nacc = n = 0
-    corr = log(alg.h) 
-    while true   # this could be parallelized to some extent using blocks
-        n += 1
-        sptree = randtree(smpler)
-        G = randsplits(MSC(sptree, init))
-        l = logpdf(X, G)
-        u = log(rand())
-        if u - corr < l
-            nacc += 1
-            push!(sims.accsims, (l, sptree))
-        end
-        push!(sims.us, u)  # store the random numbers...
-        push!(sims.allsims, (l, sptree))
-        (n ≥ alg.maxsim || nacc ≥ alg.target) && break
-        sptree = randtree(smpler)
-    end
-    return n, nacc
-end
-
-"""
-    _inner_threaded!(...)
-
-See `_inner_serial!`, but in a multi-threaded implementation using a
-user-defined batch size for simulation batches executed in parallel.
-"""
-function _inner_threaded!(X, smpler, init, alg, sims)
-    nacc = n = 0
-    corr = log(alg.h) 
-    while true
-        # simulate in parallel in batches of size `alg.batch`
-        y = similar(sims.allsims, alg.batch)
-        Threads.@threads for j=1:alg.batch
-            sptree = randtree(smpler)
-            G = randsplits(MSC(sptree, init))
-            l = logpdf(X, G)
-            y[j] = (l, sptree)
-        end
-        u = log.(rand(alg.batch))
-        accepted = u .- corr .< first.(y)
-        sims.accsims = vcat(sims.accsims, y[accepted])
-        sims.allsims = vcat(sims.allsims, y)
-        sims.us = vcat(sims.us, u)
-        nacc += sum(accepted)
-        n += alg.batch
-        (n ≥ alg.maxsim || nacc ≥ alg.target) && break
-    end
-    return n, nacc
-end
-
-"""
-    _tuneh!(...)
-
-Tune the `h` parameter.
-"""
-function _tuneh!(alg, n, nacc, sims)
-    !alg.tuneh || nacc < alg.minacc && return 
-    @unpack us, allsims, accsims = sims
-    ls = first.(allsims)
-    Ep = exp(logsumexp(ls))/n
-    h = min(alg.h, max(1., alg.target / (alg.maxsim * Ep)))
-    alg.h = (1-alg.ν) * alg.h + alg.ν * h  # convex update
-end
-    
-"""
-    _momentmatching(...)
-
-Compute the new global approximation by approximating the tilted distribution
-within the exponential family using some form of moment matching.
-"""
-function _momentmatching(alg, cavity, nacc, sims)
-    nacc < alg.minacc && return alg.model
-    full = matchmoments(last.(sims.accsims), cavity, alg.α)
-    return full
-end
-
-#"""
-#    ep_parallel!(alg)
-#
-#Embarrassingly parallel EP pass.
-#"""
-#function ep_parallel!(alg)
-#    N = length(alg.data)
-#    iter = ProgressBar(1:N)
-#    Threads.@threads for i in iter
-#        nacc, n, h, full, cavity, _ = ep_iteration(alg, i)
-#        alg.sites[i] = full - cavity
-#        desc = string(@sprintf("%8.3gh%4d%4d/%6d", h, i, nacc, n))
-#        set_description(iter, desc)
-#    end
-#    alg.sites[1:N] .= map(x->alg.λ*x, alg.sites[1:N])
-#    alg.model = reduce(+, alg.sites)
-#    # XXX deal with damped updates... 
-#    prune!(alg)
-#    return alg.model
-#end
-    
+# update the model (main EP update)
 function update!(alg, full, cavity, i, lZ)
     @unpack λ, prunetol = alg
     siteup = λ * (full - alg.model)
@@ -271,37 +50,154 @@ function update!(alg, full, cavity, i, lZ)
     # with λ? should we use the updated model or not?
 end
 
-function prune!(alg)
-    @unpack prunetol, sites = alg
-    prunetol == 0. && return
-    map(i->isassigned(sites, i) && prune!(sites[i], prunetol), 1:length(sites))
-    alg.model = reduce(+, sites)
+
+# Importance Sampler
+# ------------------
+@with_kw mutable struct ImportanceSampler{P} <: SiteUpdateAlgorithm
+    N::Int64  # number of particles
+    sims::Vector{P}  # particles
+    target::Float64 = 200. # target ESS
+    miness::Float64 = 1.  # minimum ESS for succesful update
+    α::Float64 = 1e-16  # Dirichlet-MBM prior in tilted approximation
+end
+
+# in the general case we cannot recycle gene trees... so don't store them
+mutable struct Particle{T}
+    S::Branches{T}  # species tree
+    w::Float64  # sampler density
+end
+
+# undef initialized particle
+Particle(n::Int, ::Type{T}) where T = Particle(Branches{T}(undef, n), 0.)
+
+# Kong's ESS estimator
+ess(w) = 1/sum(w .^ 2) 
+
+# obtain a probability vector in a numerically safish way
+function lognormalize(ls)
+   ps = exp.(ls .- maximum(ls))
+   return ps ./ sum(ps)
 end
 
 """
-    traceback
+    EPABCIS(data, prior, nparticles; kwargs...)
+
+Likelihood-free expectation propagation with an importance sampling step to do
+the site update.
 """
-function traceback(trace; sigdigits=3)
-    clades = keys(trace[end].S.smap)
-    splits = Dict(γ=>collect(keys(trace[end].S.smap[γ].splits)) for γ in clades)
-    qclade = keys(trace[end].q.cmap)
-    traces = Dict(γ=>Vector{Float64}[] for γ in clades)
-    θtrace = Dict(γ=>Vector{Float64}[] for γ in qclade)
-    for i=length(trace):-1:1
-        m = SmoothTree.MomMBM(trace[i].S)
-        q = trace[i].q
-        for γ in clades
-            x = map(δ->haskey(m, γ) ? m[γ][δ] : NaN, splits[γ])
-            push!(traces[γ], x)
-        end
-        for γ in qclade
-            y = gaussian_nat2mom(q[γ])
-            push!(θtrace[γ], y)
-        end
+function EPABCIS(data, prior::MSCModel{T,V}, N; 
+                 λ=0.1, prunetol=1e-9, kwargs...) where {T,V}
+    sites = Vector{MSCModel{T,V}}(undef, length(data)+1)
+    siteC = fill(-Inf, length(data))
+    sites[end] = prior  # last entry is the prior
+    #sims = Vector{Particle{T}}(undef, N)
+    ntaxa = Int(log2(prior.S.root + 1))
+    nbranch = 2ntaxa - 2
+    sims = map(_->Particle(nbranch, T), 1:N)
+    siteupdate = ImportanceSampler(N=N, sims=sims; kwargs...)
+    alg = EPABC(data=data, model=prior, sites=sites, siteC=siteC,
+                siteupdate=siteupdate, λ=λ, prunetol=prunetol)
+end
+
+"""
+    ep_serial!(alg; rnd=true)
+
+Serial EP pass. When `rnd=true` the pass goes over the data in a random order. 
+"""
+function ep_serial!(alg::EPABC{<:ImportanceSampler}; rnd=true) 
+    rnge = rnd ? shuffle(1:length(alg.data)) : 1:length(alg.data)
+    iter = ProgressBar(rnge)
+    ev = n = -Inf
+    regen = true
+    trace = map(iter) do i
+        desc = string(@sprintf("%4d %8.1f %9.3f %2d", i, n, ev, regen))
+        set_description(iter, desc)
+        full, cavity, n, Z, regen = ep_iteration!(alg, i, regen)
+        update!(alg, full, cavity, i, Z) 
+        ev = evidence(alg)
+        alg.model, ev, n
+    end 
+    prune!(alg)
+    return trace
+end
+
+"""
+    ep_iteration(alg, i)
+
+Do a single EP site update with recycling of simulations.
+"""
+function ep_iteration!(alg::EPABC{<:ImportanceSampler}, i, regen=true)
+    @unpack siteupdate, data = alg
+    @unpack sims, miness, N, α, target = siteupdate
+    X = data[i]
+    cavity = getcavity(alg, i)
+    if regen
+        simulate!(sims, cavity)
+        w = zeros(N)
+    else
+        w = logweights(sims, cavity)
     end
-    f(x) = round.(permutedims(hcat(reverse(x)...)), sigdigits=sigdigits)
-    c = Dict(γ=>f(xs) for (γ, xs) in traces)
-    θ = Dict(γ=>f(xs) for (γ, xs) in θtrace)
-    return c, θ
+    # note that in the general case we cannot recycle gene trees
+    data_likelihood!(w, X, sims)
+    W, n, Z = process_weights(w)
+    if n < miness
+        full = alg.model
+    else 
+        branches = getfield.(sims, :S)
+        full = matchmoments(branches, W, cavity, α)
+    end
+    regen = n < target
+    return full, cavity, n, Z, regen
+end
+
+function data_likelihood!(w, data, sims)
+    Threads.@threads for j=1:length(w)
+        G = randsplits(sims[j].S, data.init)  # coalescent sim
+        w[j] += logpdf(data.data, G)  # kernel
+    end
+end
+
+function process_weights(w)
+    W = lognormalize(w)  # normalized importance weights
+    n = ess(W)  # ESS estimator (Kong)
+    Z = logsumexp(w) - log(length(w))  # marginal likelihood estimator
+    return W, n, Z
+end
+
+function simulate!(particles, model)
+    # it is quite a bit faster to convert to MomMBM on beforehand
+    m = MomMBM(model.S)
+    Threads.@threads for i=1:length(particles)
+        simfun!(particles[i], model, m)
+    end
+end
+
+function simfun!(p, model, m)
+    randbranches!(p.S, m, model.q)
+    p.w = logpdf(model, p.S)
+end
+
+# currently not used (mutating instead)
+# note this one actually also mutates the particles array, but not the
+# particles themselves...
+function simulate(particles, model)
+    m = MomMBM(model.S)
+    Threads.@threads for i=1:length(particles)
+        particles[i] = simfun(model, m)
+    end
+end
+
+function simfun(model, m)
+    S = randbranches(m, model.q)
+    p = Particle(S, logpdf(model, S))
+end
+
+function logweights(particles, model)
+    w = zeros(length(particles))
+    Threads.@threads for i=1:length(particles)
+        p = particles[i]
+        w[i] = logpdf(model, p.S) - p.w
+    end
+    return w
 end
 

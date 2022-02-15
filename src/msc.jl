@@ -1,19 +1,17 @@
-# we want to simulate lightning fast, and evaluate the probability of
-# the simulated tree under the ccd also lightning fast.
-# We will be fastest if we simulate a collection of clades and splits
-# directly under the MSC. 
-# - We initialize at leaves of S with the int representation of the
-#   relevant genes
-# - We simulate the MSC branch by branch, upon coalescence of c1 and c2
-#   we add to the collection of splits (c1+c2, min(c1,c2)), and
-#   simulate further with c1+c2
-# - For this collection of (γ, δ) pairs we can evaluate the
-#   probability under the CCD, without needing recursion
-# The crucial thing here is that we need not actually store the tree
-# data structure in the way we usually do, and gain efficiency that
-# way.
+# we want to simulate lightning fast, and evaluate the probability of the
+# simulated tree under the ccd also lightning fast.  We will be fastest if we
+# simulate a collection of clades and splits directly under the MSC. 
+# - We initialize at leaves of S with the int representation of the relevant
+#   genes
+# - We simulate the MSC branch by branch, upon coalescence of c1 and c2 we add
+#   to the collection of splits (c1+c2, min(c1,c2)), and simulate further with
+#   c1+c2
+# - For this collection of (γ, δ) pairs we can evaluate the probability under
+#   the CCD, without needing recursion
+# The crucial thing here is that we need not actually store the tree data
+# structure in the way we usually do, and gain efficiency that way.
 
-# XXX Minimalist implementation
+# Minimalist implementation
 """
     MSC(species_tree, initialization::Dict)
  
@@ -59,22 +57,6 @@ default_init(S, tmap::BiMap) = Dict(id(n)=>[tmap[name(n)]] for n in getleaves(S)
 
 MSC(S, tmap::BiMap) = MSC(S, default_init(S, tmap))
 
-# non-recursive version -- takes the same amount of time and has exactly the
-# same amount of allocations... (recursive version seems even to have a slight
-# edge, because it doesn't have to store the states at internal nodes I guess)
-function randsplits2(model::MSC{T}, order) where T
-    @unpack tree, init = model
-    splits = Splits{T}()
-    for n in order
-        isleaf(n) && continue
-        left, splits = _censoredcoalsplits!(splits, distance(n[1]), init[id(n[1])])
-        rght, splits = _censoredcoalsplits!(splits, distance(n[2]), init[id(n[2])])
-        init[id(n)] = vcat(left, rght)
-    end
-    _, splits = _censoredcoalsplits!(splits, distance(tree), init[id(tree)])
-    return splits
-end
-
 # generate a tree from the MSC model, in the form of a set of splits.
 function randsplits(model::MSC{T}) where T
     _, splits = _coalsplits(model.tree, Splits{T}(), model.init)
@@ -116,3 +98,18 @@ end
 randtree(model::MSC, lmap::AbstractDict) = gettree(randsplits(model), lmap)
 randtree(model::MSC, lmap::AbstractDict, n) = map(_->randtree(model, lmap), 1:n)
 
+# non-recursive version -- takes the same amount of time and has exactly the
+# same amount of allocations... (recursive version seems even to have a slight
+# edge, because it doesn't have to store the states at internal nodes I guess)
+#function randsplits2(model::MSC{T}, order) where T
+#    @unpack tree, init = model
+#    splits = Splits{T}()
+#    for n in order
+#        isleaf(n) && continue
+#        left, splits = _censoredcoalsplits!(splits, distance(n[1]), init[id(n[1])])
+#        rght, splits = _censoredcoalsplits!(splits, distance(n[2]), init[id(n[2])])
+#        init[id(n)] = vcat(left, rght)
+#    end
+#    _, splits = _censoredcoalsplits!(splits, distance(tree), init[id(tree)])
+#    return splits
+#end

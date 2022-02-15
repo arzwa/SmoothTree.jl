@@ -1,9 +1,4 @@
-# get the lmap out of the CCD. Why? e.g. when simulating species trees in the
-# EP-ABC, we should be able to get a CCD without requiring some species name
-# map. We should also be able to get a CCD just from splits, irrespective of
-# what these splits are named etc.
-# Locus will be a bundling of these things then...
-
+# by convention we assume genes are labeled "species_gene"
 speciesname(x) = string(split(x, "_")[1])
 
 """

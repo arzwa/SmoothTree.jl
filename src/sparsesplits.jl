@@ -59,14 +59,14 @@ end
 
 # Natural to moment parameterization conversion
 function nat2mom(x::SparseSplits)
-    ρ = x.ref
+    η0 = exp.(x.η0)
     d = Dict(k=>exp(v) for (k,v) in x.splits)
     S = sum(values(d))
-    Z = S + sum(x.k .* exp.(x.η0))
+    Z = S + sum(x.k .* η0)
     for (k, v) in d
         d[k] /= Z
     end
-    return SparseSplits(d, x.γ, x.n, x.k, exp.(x.η0)/Z, ρ)
+    return SparseSplits(d, x.γ, x.n, x.k, η0/Z, x.ref)
 end
 
 # Moment to natural parameterization conversion
@@ -99,6 +99,7 @@ function _priorsplit(x::SparseSplits)
 end
 
 # Define linear operations
+# only for natural params...
 function Base.:+(x::SparseSplits{T,V}, y::SparseSplits) where {T,V}
     @assert x.γ == y.γ
     splits = union(keys(x.splits), keys(y.splits))

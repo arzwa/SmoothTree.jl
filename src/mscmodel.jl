@@ -1,3 +1,6 @@
+# Need a way to keep the general implementation, but where in the case of tip
+# branches with a single sample we do not store the approximation...
+
 """
     MSCModel
 
@@ -9,81 +12,113 @@ multispecies coalescent model. Note that:
   Gaussians, one for each *clade*, i.e. representing the parameter for
   the branch leading to that clade as a crown group.
 """
-struct MSCModel{T,V,U,W}
+struct MSCModel{T,V}
     S::NatMBM{T,V}       # species tree distribution approximation
-    q::BranchModel{U,W}  # branch parameter distribution approximation
-    m::BiMap{T,String}   # species label to clade map
+    q::BranchModel{T,V}  # branch parameter distribution approximation
 end
 
 Base.show(io::IO, m::MSCModel) = write(io, "$(typeof(m))")
 
 # linear operations
-Base.:+(x::MSCModel, y::MSCModel) = MSCModel(x.S + y.S, x.q + y.q, x.m)
-Base.:-(x::MSCModel, y::MSCModel) = MSCModel(x.S - y.S, x.q - y.q, x.m)
-Base.:*(x::MSCModel, a) = MSCModel(x.S * a, x.q * a, x.m)
-Base.:*(a, x::MSCModel) = MSCModel(x.S * a, x.q * a, x.m)
+Base.:+(x::MSCModel, y::MSCModel) = MSCModel(x.S + y.S, x.q + y.q)
+Base.:-(x::MSCModel, y::MSCModel) = MSCModel(x.S - y.S, x.q - y.q)
+Base.:*(x::MSCModel, a) = MSCModel(x.S * a, x.q * a)
+Base.:*(a, x::MSCModel) = MSCModel(x.S * a, x.q * a)
 
-# In the EP algorithm we sample a lot of species trees, using the
-# moment-space MBM
-struct MSCSampler{T,V,U,W}
-    S::MomMBM{T,V}
-    q::BranchModel{U,W}
+# efficiency of randtree/randbranches is similar
+# randtree somewhat less efficient, but for larger models with more represented
+# splits the difference is negligible, for instance
+# julia> @btime randtree(alg.model);
+#  114.373 μs (203 allocations: 122.53 KiB)
+# julia> @btime randbranches(alg.model);
+#  113.998 μs (129 allocations: 119.28 KiB)
+# since working with trees is more elegant than the branches/splits structs,
+# perhaps we should? The coalescent sims are also marginally faster in the tree
+# case...
+#function randtree(model::MSCModel)
+#    tree = Node(model.S.root, Inf)
+#    _randtree(tree, model.S.root, model)
+#end
+#
+#function _randtree(node, γ, model)
+#    isleafclade(γ) && return node
+#    left = randsplit(model.S, γ)
+#    rght = γ - left
+#    dl = randbranch(model.q, γ, left)
+#    dr = randbranch(model.q, γ, rght)
+#    nl = Node(left, dl, node)
+#    nr = Node(rght, dr, node)
+#    _randtree(nl, left, model)
+#    _randtree(nr, rght, model)
+#    return node
+#end
+#
+## simulate a species tree from the MSCModel
+## speed-up by pre-allocating and indexing, not pushing to en empty array?
+#randbranches(m::MSCModel) = randbranches(m.S, m.q)
+#
+#function randbranches(S::AbstractMBM{T}, q) where {T,V}
+#    branches = Branches{T}()
+#    _randbranches(branches, S.root, S, q)
+#end
+#
+#function _randbranches(branches, γ, S, q)
+#    isleafclade(γ) && return branches
+#    left = randsplit(S, γ)
+#    rght = γ - left
+#    dl = randbranch(q, γ, left)
+#    dr = randbranch(q, γ, rght)
+#    push!(branches, (γ, left, dl))
+#    push!(branches, (γ, rght, dr))
+#    branches = _randbranches(branches, left, S, q)
+#    branches = _randbranches(branches, rght, S, q)
+#    return branches
+#end
+
+# simulate species tree branches, modifying a pre-existing `Branches` vector
+randbranches!(b, m::MSCModel) = randbranches!(b, m.S, m.q)
+
+function randbranches!(branches, S, q)
+    _randbranches!(branches, 1, S.root, S, q)
 end
 
-MSCSampler(m::MSCModel) = MSCSampler(MomMBM(m.S), m.q)
-
-Base.eltype(m::MSCSampler{T,V,U,W}) where {T,V,U,W} = Node{T,NewickData{W,String}}
-
-"""
-    randtree(model::MSCSampler)
-
-Simulate a species tree from an MSCModel (in the EP-ABC algorithm this
-is used to simulate from the cavity)
-"""
-function randtree(model::MSCSampler)
-    S = randtree(model.S)  # a random tree topology
-    _randbranches!(S, model.q)
-    return S
-end
-# NOTE: we are not yet dealing with the rooted case, where the
-# branches stemming from the root should have infinite length...
-randtree(model::MSCModel) = randtree(MSCSampler(model))
-randtree(model::MSCModel, n) = randtree(MSCSampler(model), n)
-
-"""
-    updated_model(trees, cavity, α)
-
-Method to update the full approximation by moment matching.  This
-matches the moments of the MBM distribution to the Dirichlet-MBM
-posterior with prior `α` for the accepted trees, and updates the
-Gaussian distributions for the branch parameters.
-"""
-function matchmoments(trees, cavity::MSCModel{T}, α) where T
-    m = shitmap(trees[1], T)  # XXX sucks?
-    S = NatMBM(CCD(trees, m), cavity.S.beta, α)#, αroot=0.)) respect rooting?
-    q = matchmoments(trees, cavity.q)
-    # XXX we should get the CCD and branch lengths in one pass over `trees`
-    return MSCModel(S, q, cavity.m)
+function _randbranches!(branches, i, γ, S, q)
+    isleafclade(γ) && return i
+    left = randsplit(S, γ)
+    rght = γ - left
+    dl = randbranch(q, γ, left)
+    dr = randbranch(q, γ, rght)
+    branches[i]   = (γ, left, dl)
+    branches[i+1] = (γ, rght, dr)
+    j = _randbranches!(branches, i+2, left, S, q)
+    j = _randbranches!(branches, j, rght, S, q)
+    return j
 end
 
-# a weighted sample (importance sampling)
-function matchmoments(trees, weights, cavity::MSCModel{T}, α) where T
-    m = shitmap(trees[1], T)  # XXX sucks?
-    S = NatMBM(CCD(zip(trees, weights), m, Float64), cavity.S.beta, α)
-    q = matchmoments(trees, weights, cavity.q)
-    # XXX we should get the CCD and branch lengths in one pass over `trees`
-    return MSCModel(S, q, cavity.m)
+# simulate a gene tree from species tree branches
+function randsplits(branches::Branches{T}, init::V) where {T,V}
+    root = branches[1][1]
+    splits = Splits{T}()
+    inner = V()  # NOTE we cannot modify init -- messes with threads!
+    for i=length(branches):-2:1
+        γ, δ1, θ1 = branches[i]
+        γ, δ2, θ2 = branches[i-1]
+        # note, the copy is necessary here in case there are multiple lineages
+        # in a tip branch... because _censoredcoalsplits modifies l1, l2...
+        l1 = isleafclade(δ1) ? copy(init[δ1]) : inner[δ1]
+        l2 = isleafclade(δ2) ? copy(init[δ2]) : inner[δ2]
+        left, splits = _censoredcoalsplits!(splits, θ1, l1)
+        rght, splits = _censoredcoalsplits!(splits, θ2, l2)
+        inner[γ] = vcat(left, rght)
+    end
+    _, splits = _censoredcoalsplits!(splits, Inf, inner[root])
+    return splits
 end
 
-shitmap(tree, T) = BiMap(Dict(T(id(n))=>name(n) for n in getleaves(tree)))
-# issue is that we are using the id field here (which is good here
-# internally, not in general), but `CCD` uses a taxonmap and the name
-# field (good in general)...
-   
-function prune(model::MSCModel, atol=1e-9)
-    S = prune(model.S, atol)
-    q = prune(model.q, atol)
-    return MSCModel(S, q, model.m)
+function matchmoments(branches, weights, cavity, α)
+    S = NatMBM(CCD(branches, weights), cavity.S.beta, α)
+    q = matchmoments(branches, weights, cavity.q)
+    return MSCModel(S, q)
 end
 
 function prune!(model::MSCModel, atol=1e-9)
@@ -99,11 +134,27 @@ Compute the logpartition function of the MSCModel.
 logpartition(model::MSCModel) = logpartition(model.S) + logpartition(model.q)
 
 """
-    logpdf(model, species_tree)
+    logpdf(model, branches)
 """
-function logpdf(model::MSCModel{T}, S) where T
-    m = shitmap(S, T)  # sucks! buggy!
-    xs, bs = getsplits_with_length(S, m)
-    l = logpdf(model.S, xs) + logpdf(model.q, bs)
+function logpdf(model::MSCModel, branches::Branches)
+    l = 0.
+    for i=1:2:length(branches)
+        γ, δ, d = branches[i]
+        l += splitpdf(model.S, γ, min(γ-δ, δ))
+        isfinite(d) && (l += logpdf(model.q, γ, δ, d))
+        γ, δ, d = branches[i+1]
+        isfinite(d) && (l += logpdf(model.q, γ, δ, d))
+    end
+    return l
+end
+
+# Get the Gaussian approximations for the branch lengths under the model given
+# a tree.
+function getbranchapprox(model, splits::Splits)
+    branches = mapreduce(x->[x, (x[1], x[1]-x[2])], vcat, splits)
+    map(branches) do (γ, δ)
+        μ, V = gaussian_nat2mom(model.q[(γ, δ)])
+        (γ, δ, Normal(μ, √V))
+    end
 end
 

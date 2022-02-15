@@ -1,6 +1,3 @@
-# There seems to be no good reason why we define the branch model at the clade
-# level and not the split level...
-
 """
     BranchModel{T,V}
 
@@ -14,10 +11,13 @@ struct BranchModel{T,V}
     root ::T
     cmap ::Dict{Tuple{T,T},Vector{V}}  # (clade, split) => natural parameter 
     η0   ::Vector{V}          # natural parameter for unrepresented clade
+    inftips::Vector{T}
 end
 
 # initialize an empty branchmodel object
-BranchModel(root::T, η0::V) where {T,V} = BranchModel(root, Dict{Tuple{T,T},V}(), η0)
+function BranchModel(root::T, η0::V; inftips=T[]) where {T,V} 
+    BranchModel(root, Dict{Tuple{T,T},V}(), η0, inftips)
+end
 
 # some accessors
 Base.haskey(m::BranchModel, γ) = haskey(m.cmap, γ)
@@ -27,19 +27,19 @@ Base.getindex(m::BranchModel, γ) = haskey(m, γ) ? m.cmap[γ] : m.η0
 function Base.:+(x::BranchModel{T,V}, y::BranchModel{T,V}) where {T,V}
     clades = union(keys(x.cmap), keys(y.cmap))
     d = Dict(γ=>x[γ] .+ y[γ] for γ in clades)
-    return BranchModel(x.root, d, x.η0 .+ y.η0)
+    return BranchModel(x.root, d, x.η0 .+ y.η0, x.inftips)
 end
 
 function Base.:-(x::BranchModel{T,V}, y::BranchModel{T,V}) where {T,V}
     clades = union(keys(x.cmap), keys(y.cmap))
     d = Dict(γ=>x[γ] .- y[γ] for γ in clades)
-    return BranchModel(x.root, d, x.η0 .- y.η0)
+    return BranchModel(x.root, d, x.η0 .- y.η0, x.inftips)
 end
 
 Base.:*(a, x::BranchModel) = x * a
 function Base.:*(x::BranchModel{T,V}, a::V) where {T,V}
     d = Dict(γ=>a*v for (γ, v) in x.cmap)
-    BranchModel(x.root, d, a*x.η0)
+    BranchModel(x.root, d, a*x.η0, x.inftips)
 end
 
 # moment <-> natural transformations
@@ -49,68 +49,56 @@ gaussian_mom2nat(μ , V ) = (μ/V, -1.0/(2V))
 gaussian_nat2mom(η::Vector) = [-η[1]/(2η[2]), -1.0/(2η[2])]
 gaussian_mom2nat(θ::Vector) = [θ[1]/θ[2], -1.0/(2θ[2])]
 
+# a random branch length from the model
+function randbranch(q::BranchModel, γ, δ) 
+    δ ∈ q.inftips && return Inf
+    return exp(randgaussian_nat(q[(γ, δ)]))
+end
+
 # draw a random Gaussian number from natural parameterization
 randgaussian_nat(η) = randgaussian_nat(η[1], η[2])
+
 function randgaussian_nat(η1, η2) 
     μ, V = gaussian_nat2mom(η1, η2)
     return μ + √(V) * randn()
 end
 
-# Moment matching, i.e. get a BranchModel in moment space
-# Note that each tree is associated with an (implicit) parameter
-# vector for *all* clades, so that when a clade is not in a tree, we
-# have to add a virtual draw from the cavity.
-function matchmoments(trees, weights, cavity::BranchModel{T,V}) where {T,V}
+# Moment matching, i.e. get a BranchModel in moment space Note that each tree
+# is associated with an (implicit) parameter vector for *all* clades, so that
+# when a clade is not in a tree, we have to add a virtual draw from the cavity.
+function matchmoments(branches, weights, cavity::BranchModel{T,V}) where {T,V}
     d = Dict{Tuple{T,T},Vector{V}}()
     # obtain moment estimates
-    for (tree, w) in zip(trees, weights)
-        _record_branchparams!(d, tree, w)
+    for (b, w) in zip(branches, weights)
+        addtree!(d, b, w)
     end
     # add unrepresented prior samples
-    _cavity_contribution!(d, cavity)
+    cavity_contribution!(d, cavity)
     # convert to natural parameters
-    q = Dict(γ => _mom2nat(v[2], v[3]) for (γ, v) in d)
-    BranchModel(cavity.root, q, cavity.η0)
-end
-
-# equally weighted (e.g. rejection sample)
-function matchmoments(trees, cavity::BranchModel{T,V}) where {T,V}
-    d = Dict{Tuple{T,T},Vector{V}}()
-    w = 1/length(trees)
-    for tree in trees
-        _record_branchparams!(d, tree, w)
-    end
-    _cavity_contribution!(d, cavity)
-    q = Dict(γ => _mom2nat(v[2], v[3]) for (γ, v) in d)
-    BranchModel(cavity.root, q, cavity.η0)
+    q = Dict(γ => suff2nat(v[2], v[3]) for (γ, v) in d)
+    BranchModel(cavity.root, q, cavity.η0, cavity.inftips)
 end
 
 # recursively process a tree to get the sufficient statistics for
 # branch parameters
-function _record_branchparams!(d, node, w)
-    isleaf(node) && return id(node), log(distance(node))
-    left, dl = _record_branchparams!(d, node[1], w) 
-    rght, dr = _record_branchparams!(d, node[2], w) 
-    clade = left + rght
-    if isfinite(dl)
-        k = (clade, left)
-        !haskey(d, k) && (d[k] = zeros(3))
-        d[k] .+= [w, w*dl, w*dl^2]
+function addtree!(d, b::Branches, w)
+    for (γ, δ, x) in b
+        !isfinite(x) && continue
+        lx = log(x)  # input is on ℝ⁺
+        branch = (γ, δ)
+        !haskey(d, branch) && (d[branch] = zeros(3))
+        d[branch][1] += w
+        d[branch][2] += w*lx
+        d[branch][3] += w*lx^2
     end
-    if isfinite(dr)
-        k = (clade, rght)
-        !haskey(d, k) && (d[k] = zeros(3))
-        d[k] .+= [w, w*dr, w*dr^2]
-    end
-    return clade, log(distance(node))
 end
 
 # add the cavity (pseudo-prior) contribution to the moment estimates
 # (for those clades which are not either observed or unobserved in all trees)
-function _cavity_contribution!(d, cavity)
+function cavity_contribution!(d, cavity)
     for (γ, xs) in d
         w = 1. - xs[1]  # number of cavity draws to 'add'
-        μ, V = gaussian_nat2mom(cavity[γ]...)
+        μ, V = gaussian_nat2mom(cavity[γ])
         d[γ][2] += w*μ
         d[γ][3] += w*(V + μ^2)
     end
@@ -118,66 +106,9 @@ end
 
 # compute moments from sufficient statistics and convert to natural
 # parameters
-function _mom2nat(μ, Esq) 
+function suff2nat(μ, Esq) 
     V = Esq - μ^2
     [gaussian_mom2nat(μ, V)...]
-end
-
-# draw random branch lengths for a given tree according to a BranchModel
-# XXX currently assumes tip branches have no meaningful branch length
-function _randbranches!(node, q::BranchModel)
-    if isleaf(node) 
-        node.data.distance = Inf
-        return id(node), true
-    end
-    left, ll = _randbranches!(node[1], q)
-    rght, lr = _randbranches!(node[2], q)
-    clade = left + rght
-    if !ll  # left is not a leaf node
-        η = q[(clade, left)]
-        node[1].data.distance = exp(randgaussian_nat(η[1], η[2]))
-    end
-    if !lr  # right is not a leaf node
-        η = q[(clade, rght)]
-        node[2].data.distance = exp(randgaussian_nat(η[1], η[2]))
-    end
-    return clade, false
-end
-
-"""
-    MomBranchModel
-
-BranchModel in moment parameter space, not really used, more for
-convenience (interpretability).
-"""
-struct MomBranchModel{T,V}
-    root ::T
-    cmap ::Dict{Tuple{T,T},Vector{V}}  # clade => natural parameter 
-    η0   ::Vector{V}          # natural parameter for unrepresented clade
-end
-
-function MomBranchModel(q::BranchModel)
-    m = Dict(γ=>gaussian_nat2mom(η) for (γ, η) in q.cmap)
-    MomBranchModel(q.root, m, gaussian_nat2mom(q.η0))
-end
-
-function BranchModel(q::MomBranchModel)
-    m = Dict(γ=>gaussian_mom2nat(η) for (γ, η) in q.cmap)
-    BranchModel(q.root, m, gaussian_mom2nat(q.η0))
-end
-
-Base.haskey(m::MomBranchModel, γ) = haskey(m.cmap, γ)
-Base.getindex(m::MomBranchModel, γ) = haskey(m, γ) ? m.cmap[γ] : m.η0
-
-
-# pruning: note that we cannot just remove those clades not in the
-# associated BMP. When we prune a BMP, we will remove for instance
-# probability 1 clades with two leaves from the smap (since they need
-# not be represented explicitly), however, their clade in the branch
-# model should not be removed!
-function prune(m::BranchModel, atol)
-    d = Dict(γ=>v for (γ,v) in m.cmap if all(isapprox(v, m.η0, atol=atol)))
-    BranchModel(m.root, d, m.η0)
 end
 
 function prune!(m::BranchModel, atol)
@@ -191,7 +122,7 @@ gaussian_logpartition(η1, η2) = -η1^2/4η2 - 0.5log(-2η2)
 
 function logpartition(m::BranchModel)
     n = cladesize(m.root)
-    N = 3^n - 2^(n+1) + 1
+    N = 3^n - 2^(n+1) + 1  # total number of parameters 
     Z = 0.
     for (k, v) in m.cmap
         Z += gaussian_logpartition(v[1], v[2])
@@ -201,20 +132,13 @@ function logpartition(m::BranchModel)
 end
 
 """
-    logpdf(m::, splits)
-
-`splits` should be a vector of ((parentclade, subclade), branch_length) tuples.
+    logpdf(m::BranchModel, clade, subclade, length)
 """
-function logpdf(m::BranchModel, splits)
-    l = 0.
-    for (k,v) in splits
-        !isfinite(v) && continue  # irrelevant branch
-        μ, V = gaussian_nat2mom(m[k])
-        if isnan(V)  # happens...
-            μ, V = gaussian_nat2mom(m.η0)
-        end
-        l += logpdf(Normal(μ, √V), log(v))
+function logpdf(m::BranchModel, γ, δ, d)
+    μ, V = gaussian_nat2mom(m[(γ, δ)])
+    if isnan(V)  
+        μ, V = gaussian_nat2mom(m.η0)
     end
-    return l
+    return logpdf(Normal(μ, √V), log(d))
 end
 

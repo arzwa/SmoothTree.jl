@@ -1,11 +1,11 @@
 # SmoothTree
-#
+
 # # Example: simulated data for a five taxon species tree
 using Pkg; Pkg.activate(@__DIR__)
 using SmoothTree, NewickTree, Distributions
 
 # The species tree topology we will use:
-species = string.('A':'N')
+species = string.('A':'J')
 spmap = clademap(species, UInt64)
 root = sum(keys(spmap))
 ntaxa = length(spmap)
@@ -30,18 +30,20 @@ ranking(G)
 data = SmoothTree.Locus.(G, Ref(spmap), 1/(2^ntaxa -1), -1.)
 
 # use a Beta-splitting prior
-Sprior = NatMBM(root, BetaSplitTree(-1., ntaxa))
+Sprior = NatMBM(CCD(G, spmap), BetaSplitTree(-1., ntaxa), 100.)
+randtree(Sprior, 10000) |> ranking
 
 # branch length prior
 μ = 2.; V = 2.
-θprior = BranchModel(root, gaussian_mom2nat([log(μ), V]))
+tips = collect(keys(spmap))
+θprior = BranchModel(root, gaussian_mom2nat([log(μ), V]), inftips=tips)
 
 # the species tree model
 model = MSCModel(Sprior, θprior)
 
-alg = SmoothTree.EPABCIS(data, model, 10000, target=5000, miness=5., prunetol=1e-5)
+alg = SmoothTree.EPABCIS(data, model, 10000, target=100, miness=5., prunetol=1e-5)
 
-trace = ep!(alg, 2)
+trace = ep!(alg, 3)
 
 # Take a sample from the posterior approximation
 relabel.(randtree(alg.model.S, 10000), Ref(spmap)) |> ranking
@@ -59,4 +61,5 @@ map(bs) do (γ, δ, d)
     plot(Normal(log(μ), √V), fill=true, color=:lightgray)
     plot!(d, color=:black)
     vline!([log(true_bl[(γ, δ)])], color=:black, ls=:dot)
-end |> x->plot(x..., size=(650,350))
+end |> x->plot(x..., size=(1200,800))
+
