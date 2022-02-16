@@ -14,7 +14,7 @@ S = relabel(S, spmap)
 
 # We set some random branch lengths
 l = SmoothTree.n_internal(S)
-θ = rand(Gamma(4., 1/2), l)
+θ = rand(Gamma(3., 1/2), l)
 SmoothTree.setdistance_internal!(S, θ)
 
 # We need a map associating with each clade its name. 
@@ -27,14 +27,14 @@ ranking(G)
 
 # Now put them in the relevant data structure for doing inference. From here
 # on the code should be like for an analysis of actual empirical data.
-data = SmoothTree.Locus.(G, Ref(spmap), 1/(2^ntaxa -1), -1.)
+data = Locus.(G, Ref(spmap), 1/(2^ntaxa -1), -1.)
 
 # use a Beta-splitting prior
 Sprior = NatMBM(CCD(G, spmap), BetaSplitTree(-1., ntaxa), 100.)
 randtree(Sprior, 10000) |> ranking
 
 # branch length prior
-μ = 2.; V = 2.
+μ = 1.5; V = 2.
 tips = collect(keys(spmap))
 θprior = BranchModel(root, gaussian_mom2nat([log(μ), V]), inftips=tips)
 
@@ -48,7 +48,7 @@ trace = ep!(alg, 3)
 # Take a sample from the posterior approximation
 relabel.(randtree(alg.model.S, 10000), Ref(spmap)) |> ranking
 
-SmoothTree.topologize(S)
+topologize(S)
 
 # now look at the branch approximation for the relevant tree
 using Distributions, Plots, StatsPlots
@@ -63,3 +63,5 @@ map(bs) do (γ, δ, d)
     vline!([log(true_bl[(γ, δ)])], color=:black, ls=:dot)
 end |> x->plot(x..., size=(1200,800))
 
+xs = traceback(first.(trace))
+plot(plot(xs.θ), plot(xs.μ), plot(xs.V), plot(getindex.(trace, 2)))

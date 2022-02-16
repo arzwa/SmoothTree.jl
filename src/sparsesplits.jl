@@ -32,6 +32,8 @@ function Base.getindex(m::SparseSplits, δ)
     haskey(m.splits, δ) ? m.splits[δ] : m.η0[splitsize(m.γ, δ)]
 end
 
+SparseSplits(γ::T, β) where T = SparseSplits(γ, Dict{T,Int}(), β, 1.)
+
 """
 Get a natural parameter SparseSplits object from split counts `d`,
 assuming the Beta-splitting Dirichlet prior with pseudo-count α and

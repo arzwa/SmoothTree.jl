@@ -35,8 +35,8 @@ end
 Base.show(io::IO, m::M) where M<:AbstractMBM = write(io, "$M(o=$(m.root))")
 Base.haskey(m::AbstractMBM, γ) = haskey(m.smap, γ)
 Base.haskey(m::AbstractMBM, γ, δ) = haskey(m, γ) && haskey(m.smap[γ], δ)
-Base.getindex(m::AbstractMBM, γ) = m.smap[γ]
-Base.getindex(m::AbstractMBM, γ, δ) = m.smap[γ][δ]
+Base.getindex(m::AbstractMBM, γ) = haskey(m, γ) ? m.smap[γ] : SparseSplits(γ, m.beta)  # return 'empty' SparseSplits
+Base.getindex(m::AbstractMBM, γ, δ) = m[γ][δ]
 
 # 'empty' MBM (uniform on splits, this does *not* correspond to the
 # zero MBM...)

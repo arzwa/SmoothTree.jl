@@ -3,11 +3,11 @@ module SmoothTree
 using NewickTree, StatsBase, Parameters, Random, StatsFuns, Distributions
 using Printf, ProgressBars, SpecialFunctions, ThreadTools
 import Distributions: logpdf
-export CCD, MSC, randtree, randsplits, randbranches, traceback
+export CCD, MSC, Locus, randtree, randsplits, randbranches, traceback
 export setdistance!, setdistance_internal!
-export NatMBM, MomMBM, MSCModel, BranchModel, traceback, ep!, pep!, EPABC
+export NatMBM, MomMBM, MSCModel, BranchModel, ep!, pep!, EPABC, EPABCIS
 export ranking, clademap, BetaSplitTree, cladesize, splitsize, rootclade
-export relabel, gaussian_mom2nat
+export relabel, gaussian_mom2nat, topologize
 
 include("trees.jl")
 include("bimap.jl")

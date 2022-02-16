@@ -2,7 +2,7 @@ using Pkg; Pkg.activate(@__DIR__)
 using SmoothTree, NewickTree, StatsBase, Distributions
 using Plots, LaTeXStrings, StatsPlots, Measures
 default(gridstyle=:dot, legend=false, framestyle=:box,
-        title_loc=:left, titlefont=10, xguidefont=10)
+        title_loc=:left, titlefont=10, guidefont=10)
 
 # Simulation and numerical posterior for the four-taxon case this calls
 # 'hybrid-coal' by Zha & Degnan (https://github.com/hybridLambda/hybrid-coal)
@@ -201,9 +201,9 @@ ps4 = [plot(xs.θ, title=L"\theta"; kwargs...),
        plot(xs.V, title=L"\sigma^2"; kwargs...)]
 
 # 5. combined plot
-plot(pl1, pl2, pl3, ps4..., layout=grid(2,3,widths=[1/3,1/3,1/3]), dpi=300, size=(800,400), bottom_margin=4mm)
+plot(pl1, pl2, pl3, ps4..., layout=grid(2,3,widths=[1/3,1/3,1/3]), dpi=300, size=(700,500), bottom_margin=4mm)
 
-#savefig("docs/img/fourtaxon.pdf")
-#savefig("docs/img/fourtaxon.png")
+savefig("docs/img/fourtaxon.pdf")
+savefig("docs/img/fourtaxon.png")
 
 
