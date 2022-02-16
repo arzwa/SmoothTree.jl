@@ -45,7 +45,6 @@ end
 
 function loglhood(tree, m, G)
     p = triple_p(tree, m)
-    #logpdf(Multinomial(sum(G), p), G)
     sum(log.(p .^ G))
 end
 

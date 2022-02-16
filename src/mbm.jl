@@ -216,6 +216,12 @@ function allsplits(x::AbstractMBM)
     end |> x->reduce(vcat, x)
 end
 
+function allbranches(x::AbstractMBM)
+    map(collect(x.smap)) do (γ, splits)
+        mapreduce(x->[(γ,x), (γ,γ-x)],vcat, collect(keys(splits.splits)))
+    end |> x->reduce(vcat, x)
+end
+
 """
     logpartition(x::AbstractMBM)
 

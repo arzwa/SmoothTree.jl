@@ -25,7 +25,7 @@ p1 = plot(pls..., size=(800,150))
 
 final_splits = SmoothTree.allsplits(alg.model.S)
 all_splits = [final_splits; [(γ,γ-δ) for (γ,δ) in final_splits]]
-qs = map(x->SmoothTree.MomBranchModel(x.q), Ms)
+qs = map(x->x.q, Ms)
 splittrace = mapreduce(x->[MomMBM(x.S)[γ,δ] for (γ, δ) in final_splits], hcat, Ms) |> permutedims
 mutrace = mapreduce(x->[x[(γ,δ)][1] for (γ, δ) in all_splits], hcat, qs) |> permutedims
 vtrace  = mapreduce(x->[x[(γ,δ)][2] for (γ, δ) in all_splits], hcat, qs) |> permutedims

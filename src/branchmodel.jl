@@ -22,6 +22,7 @@ end
 # some accessors
 Base.haskey(m::BranchModel, γ) = haskey(m.cmap, γ)
 Base.getindex(m::BranchModel, γ) = haskey(m, γ) ? m.cmap[γ] : m.η0
+Base.getindex(m::BranchModel, γ, δ) = m[(γ,δ)] 
 
 # A branch model should support a vector algebra
 function Base.:+(x::BranchModel{T,V}, y::BranchModel{T,V}) where {T,V}

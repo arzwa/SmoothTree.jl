@@ -1,3 +1,4 @@
+
 # Posterior predictive simulation
 function merge_pmaps(xs)
     ks = union(keys.(xs)...)
@@ -10,13 +11,14 @@ function merge_pmaps(xs)
     return d
 end
 
-function postpredsim(model, tmap, n, N)
-    trees = Dict()
-    pps = map(1:N) do rep
-        S = randtree(model)
-        M = MSC(S, Dict(id(x)=>[id(x)] for x in getleaves(S)))
-        ts = randtree(M, tmap, n)
-        pps = proportionmap(hash.(ts))
+# note, this is simulating data sets similar to the input data, but not
+# sampling gene trees for the actual input data from the posterior.
+function postpredsim(model::MSCModel{T}, data, n) where T
+    results = Vector{Dict{DefaultNode{T}, Float64}}(undef, n)
+    Threads.@threads for i=1:n
+        S = randbranches(model)
+        G = map(x->gettree(randsplits(S, x.init), x.lmap), data)
+        results[i] = proportionmap(G)
     end
-    merge_pmaps(pps)
+    return merge_pmaps(results)
 end

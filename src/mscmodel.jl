@@ -55,25 +55,25 @@ Base.:*(a, x::MSCModel) = MSCModel(x.S * a, x.q * a)
 #
 ## simulate a species tree from the MSCModel
 ## speed-up by pre-allocating and indexing, not pushing to en empty array?
-#randbranches(m::MSCModel) = randbranches(m.S, m.q)
-#
-#function randbranches(S::AbstractMBM{T}, q) where {T,V}
-#    branches = Branches{T}()
-#    _randbranches(branches, S.root, S, q)
-#end
-#
-#function _randbranches(branches, γ, S, q)
-#    isleafclade(γ) && return branches
-#    left = randsplit(S, γ)
-#    rght = γ - left
-#    dl = randbranch(q, γ, left)
-#    dr = randbranch(q, γ, rght)
-#    push!(branches, (γ, left, dl))
-#    push!(branches, (γ, rght, dr))
-#    branches = _randbranches(branches, left, S, q)
-#    branches = _randbranches(branches, rght, S, q)
-#    return branches
-#end
+randbranches(m::MSCModel) = randbranches(m.S, m.q)
+
+function randbranches(S::AbstractMBM{T}, q) where {T,V}
+    branches = Branches{T}()
+    _randbranches(branches, S.root, S, q)
+end
+
+function _randbranches(branches, γ, S, q)
+    isleafclade(γ) && return branches
+    left = randsplit(S, γ)
+    rght = γ - left
+    dl = randbranch(q, γ, left)
+    dr = randbranch(q, γ, rght)
+    push!(branches, (γ, left, dl))
+    push!(branches, (γ, rght, dr))
+    branches = _randbranches(branches, left, S, q)
+    branches = _randbranches(branches, rght, S, q)
+    return branches
+end
 
 # simulate species tree branches, modifying a pre-existing `Branches` vector
 randbranches!(b, m::MSCModel) = randbranches!(b, m.S, m.q)
@@ -156,5 +156,21 @@ function getbranchapprox(model, splits::Splits)
         μ, V = gaussian_nat2mom(model.q[(γ, δ)])
         (γ, δ, Normal(μ, √V))
     end
+end
+
+"""
+    traceback(trace::Vector{<:MSCModel})
+
+Trace back the history of the approximation.
+"""
+function traceback(trace::Vector{<:MSCModel})
+    ss = allsplits(trace[end].S)
+    bs = allbranches(trace[end].S)
+    Ms = MomMBM.(getfield.(trace, :S))
+    qs = getfield.(trace, :q)
+    strace = mapreduce(x->[x[γ,δ] for (γ,δ) in ss], hcat, Ms) |> permutedims
+    btrace = mapreduce(x->[x[γ,δ] for (γ,δ) in bs], hcat, qs) |> permutedims
+    X = gaussian_nat2mom.(btrace)
+    return (θ=strace, μ=first.(X), V=last.(X))
 end
 

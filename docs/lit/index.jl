@@ -9,7 +9,7 @@ S = nw"(A,(B,((C,D),(E,F))));"
 
 # We set some random branch lengths
 l = SmoothTree.n_internal(S)
-θ = rand(Gamma(4., 1/2), l)
+θ = rand(Gamma(2., 1/2), l)
 SmoothTree.setdistance_internal!(S, θ)
 
 # We need a map associating with each clade its name. 
@@ -37,7 +37,7 @@ Sprior = NatMBM(root, BetaSplitTree(-1., ntaxa))
 # the species tree model
 model = MSCModel(Sprior, θprior)
 
-alg = SmoothTree.EPABCIS(data, model, 10000, target=1000, miness=5., prunetol=1e-5)
+alg = SmoothTree.EPABCIS(data, model, 20000, target=1000, miness=5., prunetol=1e-5)
 
 trace = ep!(alg, 3)
 
@@ -45,8 +45,8 @@ trace = ep!(alg, 3)
 relabel.(randtree(alg.model.S, 10000), Ref(spmap)) |> ranking
 
 # now look at the branch approximation for the relevant tree
-using Distributions, Plots, StatsPlots
-default(gridstyle=:dot, legend=false, title_loc=:left, titlefont=8, framestyle=:box)
+using Distributions, Plots, StatsPlots, LaTeXStrings
+default(gridstyle=:dot, legend=false, title_loc=:left, titlefont=9, framestyle=:box, guidefont=8)
 
 true_bl = SmoothTree.getbranchdict(S, spmap)
 
@@ -56,3 +56,11 @@ map(bs) do (γ, δ, d)
     plot!(d, color=:black)
     vline!([log(true_bl[(γ, δ)])], color=:black, ls=:dot)
 end |> x->plot(x..., size=(650,350))
+
+# plot the traceback of the algorithm
+xs = SmoothTree.traceback(first.(trace))
+plot(plot(xs.θ, title=L"\theta"), 
+     plot(xs.μ, title=L"\mu"), 
+     plot(xs.V, title=L"\sigma^2"), 
+     plot(getindex.(trace,2), title=L"Z"), xlabel="iteration")
+
