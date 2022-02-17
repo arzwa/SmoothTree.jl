@@ -56,9 +56,9 @@ end
 @with_kw mutable struct ImportanceSampler{P} <: SiteUpdateAlgorithm
     N::Int64  # number of particles
     sims::Vector{P}  # particles
-    target::Float64 = 200. # target ESS
-    miness::Float64 = 1.  # minimum ESS for succesful update
-    α::Float64 = 1e-16  # Dirichlet-MBM prior in tilted approximation
+    target::Float64 = 100. # target ESS
+    miness::Float64 = 2.  # minimum ESS for succesful update
+    α::Float64 = 1e-3  # Dirichlet-MBM prior in tilted approximation
 end
 
 # in the general case we cannot recycle gene trees... so don't store them
@@ -113,7 +113,11 @@ function ep_serial!(alg::EPABC{<:ImportanceSampler}; rnd=true)
         desc = string(@sprintf("%4d %8.1f %9.3f %2d", i, n, ev, regen))
         set_description(iter, desc)
         full, cavity, n, Z, regen = ep_iteration!(alg, i, regen)
-        update!(alg, full, cavity, i, Z) 
+        if isfinite(Z)
+            update!(alg, full, cavity, i, Z) 
+        else
+            @warn "Z ($Z) not finite"
+        end
         ev = evidence(alg)
         alg.model, ev, n
     end 

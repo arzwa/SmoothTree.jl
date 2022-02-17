@@ -115,7 +115,7 @@ tips   = collect(keys(m))
 θprior = BranchModel(root, SmoothTree.gaussian_mom2nat([mean(prior), std(prior)^2]), inftips=tips)
 data   = SmoothTree.Locus.(Y, Ref(m), 1e-9, -1.5)
 model  = MSCModel(Sprior, θprior)
-alg    = SmoothTree.EPABCIS(data, model, 10000, target=10000, miness=10.)
+alg    = SmoothTree.EPABCIS(data, model, 10000, target=100, miness=10.)
 trace  = ep!(alg, 10);
 post   = alg.model
 

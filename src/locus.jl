@@ -46,6 +46,7 @@ Obtain a leaf <=> clade index map for a (collection of) gene tree(s) and
 associate genes with species (to initialize coalescent simulations mainly).
 """
 getmaps(trees::Vector, spmap) = getmaps(first(trees), spmap)
+getmaps(trees::Dict, spmap) = getmaps(first(keys(trees)), spmap)
 
 function getmaps(tree::Node, spmap::BiMap{T,V}) where {T,V}
     genes = sort(name.(getleaves(tree)))

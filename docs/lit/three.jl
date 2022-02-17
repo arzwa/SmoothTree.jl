@@ -88,16 +88,16 @@ bsd    = BetaSplitTree(-1.5, 3)  # uniform
 Sprior = NatMBM(root, bsd)
 θprior = SmoothTree.gaussian_mom2nat([log(1.), 5.])
 q      = BranchModel(root, θprior )
-data   = SmoothTree.Locus.(Y, Ref(spmap))
+data   = SmoothTree.Locus.(Y, Ref(m))
 model  = MSCModel(Sprior, q)
 alg    = SmoothTree.EPABCIS(data, model, 10000, target=10000, miness=10.)
 trace  = ep!(alg, 10);
 
-relabel.(randtree(alg.model.S, 10000), Ref(spmap)) |> ranking
+relabel.(randtree(alg.model.S, 10000), Ref(m)) |> ranking
 
 # some plots
 bs = SmoothTree.getbranchapprox(alg.model, randsplits(alg.model.S))
-d  = bs[2][3]
+d  = bs[1][3]
 p2 = plot(prior, color=:lightgray, fill=true, size=(300,200),
           xlabel=L"\theta", label=L"p(\theta)", title="(B)",
           xlim=(-2.5,2.5), alpha=0.5, legend=true)
@@ -115,3 +115,23 @@ plot(plot(xs.θ, title=L"\theta"),
 
 
 
+# an opportunity to investigate the effect of some algorithm settings
+αs = [1e-16, 1e-9, 1e-6, 1e-3, 0.01, 0.1, 0.2]
+Zs = map(αs) do α
+    alg    = SmoothTree.EPABCIS(data, model, 10000, target=9000, miness=10., α=α)
+    trace  = ep!(alg, 5);
+    getindex.(trace, 2)
+end
+
+plot(hcat(Zs...), label=reshape(αs, 1, 7), legend=:bottomleft, ylabel=L"Z", xlabel="iteration")
+hline!([ev], ls=:dot, color=:black)
+savefig("docs/img/three-taxa-alpha-Z.pdf")
+
+λs = [0.01, 0.05, 0.1, 0.2, 0.5]
+Zs = map(λs) do λ
+    alg    = SmoothTree.EPABCIS(data, model, 10000, target=100, miness=10., λ=λ, α=1e-5)
+    trace  = ep!(alg, 5);
+    getindex.(trace, 2)
+end
+
+plot(hcat(Zs...), label=reshape(λs, 1, 5), legend=:bottomleft)

@@ -16,6 +16,8 @@ config = (ntaxa=ntaxa,
           V=2.,
           npass=5,
           nrun=2,
+          α=1e-3,
+          λ=0.1,
          )
 
 write(joinpath(outdir, "config.txt"), string(config))
@@ -47,7 +49,7 @@ writetreed(joinpath(outdir, "genetrees.txt"), ranking(G))
 
 # data set 
 #a = 1/2^(config.ntaxa)
-#bsd = BetaSplitTree(-1.5, ntaxa)
+bsd = BetaSplitTree(-1.5, ntaxa)
 #data = Locus.(G, Ref(m), a, -1.5)
 data = Locus.(G, Ref(m))
 
@@ -60,7 +62,8 @@ Sprior = NatMBM(o, bsd)
 model = MSCModel(Sprior, θprior)
 
 results = map(1:config.nrun) do i
-    alg = EPABCIS(data, model, config.nparticle, target=config.target, miness=config.miness)
+    alg = EPABCIS(data, model, config.nparticle, target=config.target,
+                  miness=config.miness, λ=config.λ, α=config.α)
     trace = ep!(alg, config.npass)
     # check MAP tree
     smple = ranking(relabel.(randtree(alg.model.S, 10000), Ref(m)))
