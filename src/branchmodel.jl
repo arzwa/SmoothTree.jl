@@ -67,6 +67,9 @@ end
 # Moment matching, i.e. get a BranchModel in moment space Note that each tree
 # is associated with an (implicit) parameter vector for *all* clades, so that
 # when a clade is not in a tree, we have to add a virtual draw from the cavity.
+# for fixed tree analysis, correct dispatching
+matchmoments(bs, ws, cavity::BranchModel, α) = matchmoments(bs, ws, cavity)
+
 function matchmoments(branches, weights, cavity::BranchModel{T,V}) where {T,V}
     d = Dict{Tuple{T,T},Vector{V}}()
     # obtain moment estimates
@@ -143,3 +146,14 @@ function logpdf(m::BranchModel, γ, δ, d)
     return logpdf(Normal(μ, √V), log(d))
 end
 
+"""
+    logpdf(model, branches)
+"""
+function logpdf(model::BranchModel, branches::Branches)
+    l = 0.
+    for i=1:length(branches)
+        γ, δ, d = branches[i]
+        isfinite(d) && (l += logpdf(model, γ, δ, d))
+    end
+    return l
+end

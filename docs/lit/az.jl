@@ -82,3 +82,30 @@ end
 
 CSV.write(joinpath(outdir, "result.csv"), DataFrame(results))
 
+
+# ----
+
+df = CSV.read("docs/data/anomalyzone-out/data.csv", DataFrame)
+df[:,:replicate] .= repeat(1:5, 20)
+df[:,:simulation] .= repeat(1:20, inner=5)
+df[:,:correct] = df[:,:S] .== df[:,:Smap]
+
+df = rightjoin(df, combine(groupby(df, :simulation), :Z => maximum), on=:simulation)
+sort!(df, :Z_maximum)
+df[:,:simulation] .= repeat(1:20, inner=5)
+
+using Plots, LaTeXStrings, StatsPlots, Measures
+default(gridstyle=:dot, legend=false, framestyle=:box,
+        title_loc=:left, titlefont=10, guidefont=10)
+
+p = plot()
+for (i,sdf) in enumerate(groupby(df, :simulation))
+    colors = [x ? :lightgray : :orange for x in sdf[:,:correct]]
+    scatter!(repeat([i], 5), sdf[:,:Z], color=colors, markersize=4)
+end
+plot(p, xticks=1:20, ylabel=L"\hat{Z}", xlabel="replicate", size=(400,400/√2), xtickfont=6)
+
+savefig("docs/img/az-6taxa.pdf")
+
+
+

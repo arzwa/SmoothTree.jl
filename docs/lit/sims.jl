@@ -17,6 +17,9 @@ l = SmoothTree.n_internal(S)
 θ = rand(Gamma(3., 1/2), l)
 SmoothTree.setdistance_internal!(S, θ)
 
+# plot the species tree
+plot(S, transform=true, xticks=1:20, xshowaxis=true)
+
 # We need a map associating with each clade its name. 
 
 # simulate gene trees
@@ -41,7 +44,7 @@ tips = collect(keys(spmap))
 # the species tree model
 model = MSCModel(Sprior, θprior)
 
-alg = SmoothTree.EPABCIS(data, model, 5000, target=100, miness=5., prunetol=1e-9)
+alg = SmoothTree.EPABCIS(data, model, 5000, target=100, miness=5., prunetol=1e-4)
 
 trace = ep!(alg, 3)
 

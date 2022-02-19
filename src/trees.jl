@@ -11,6 +11,9 @@ const SimpleNode{T} = Node{T,Float64}
 NewickTree.distance(n::SimpleNode) = n.data
 NewickTree.name(n::SimpleNode) = n.id
 
+# we extend NewickTree here, because we deal a lot with nameless trees
+NewickTree.name(n::DefaultNode) = n.data.name == "" ? string(id(n)) : n.data.name
+
 """
     Splits{T}
 
@@ -42,7 +45,7 @@ const Branches{T} = Vector{Tuple{T,T,Float64}}
 function getbranches(n::DefaultNode{T}, m::AbstractDict) where {T}
     branches = Branches{T}()
     _getbranches(branches, n, m)
-    return branches
+    return reverse(branches)  # return in preorder
 end
 
 function _getbranches(branches, n, m)

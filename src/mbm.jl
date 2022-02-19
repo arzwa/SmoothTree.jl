@@ -216,9 +216,11 @@ function allsplits(x::AbstractMBM)
     end |> x->reduce(vcat, x)
 end
 
-function allbranches(x::AbstractMBM)
+function allbranches(x::AbstractMBM{T}) where T
+    # very ugly...
     map(collect(x.smap)) do (γ, splits)
-        mapreduce(x->[(γ,x), (γ,γ-x)],vcat, collect(keys(splits.splits)))
+        length(splits.splits) == 0 ? Tuple{T,T}[] : 
+        mapreduce(x->[(γ,x), (γ,γ-x)], vcat, collect(keys(splits.splits)))
     end |> x->reduce(vcat, x)
 end
 

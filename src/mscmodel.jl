@@ -115,7 +115,7 @@ function randsplits(branches::Branches{T}, init::V) where {T,V}
     return splits
 end
 
-function matchmoments(branches, weights, cavity, α)
+function matchmoments(branches, weights, cavity::MSCModel, α)
     S = NatMBM(CCD(branches, weights), cavity.S.beta, α)
     q = matchmoments(branches, weights, cavity.q)
     return MSCModel(S, q)
@@ -172,5 +172,29 @@ function traceback(trace::Vector{<:MSCModel})
     btrace = mapreduce(x->[x[γ,δ] for (γ,δ) in bs], hcat, qs) |> permutedims
     X = gaussian_nat2mom.(btrace)
     return (θ=strace, μ=first.(X), V=last.(X))
+end
+
+# assumes the MAP tree is represented (otherwise notw ell defined anyhow...) 
+function maptree(model::MSCModel{T}) where T
+    _maptree(Node(model.S.root), model.S.root, model.S, model.q)
+end
+
+function _maptree(node, γ, S, q)
+    isleafclade(γ) && return node
+    if ischerry(γ)
+        left = randsplit(S, γ)
+    else
+        ss = nat2mom(S[γ])
+        ps = collect(ss.splits)
+        left = argmax(last, ps)[1]
+    end
+    rght = γ - left
+    dl = exp(gaussian_nat2mom(q[(γ,left)])[1])
+    dr = exp(gaussian_nat2mom(q[(γ,rght)])[1])
+    push!(node, Node(left, d=dl))
+    push!(node, Node(rght, d=dr))
+    _maptree(node[1], left, S, q)
+    _maptree(node[2], rght, S, q)
+    return node
 end
 

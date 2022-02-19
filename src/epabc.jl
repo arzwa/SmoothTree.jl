@@ -113,11 +113,7 @@ function ep_serial!(alg::EPABC{<:ImportanceSampler}; rnd=true)
         desc = string(@sprintf("%4d %8.1f %9.3f %2d", i, n, ev, regen))
         set_description(iter, desc)
         full, cavity, n, Z, regen = ep_iteration!(alg, i, regen)
-        if isfinite(Z)
-            update!(alg, full, cavity, i, Z) 
-        else
-            @warn "Z ($Z) not finite"
-        end
+        update!(alg, full, cavity, i, Z) 
         ev = evidence(alg)
         alg.model, ev, n
     end 
@@ -144,13 +140,13 @@ function ep_iteration!(alg::EPABC{<:ImportanceSampler}, i, regen=true)
     # note that in the general case we cannot recycle gene trees
     data_likelihood!(w, X, sims)
     W, n, Z = process_weights(w)
-    if n < miness
+    if n < miness || !isfinite(Z) 
         full = alg.model
     else 
         branches = getfield.(sims, :S)
         full = matchmoments(branches, W, cavity, α)
     end
-    regen = n < target
+    regen = n < target || !isfinite(Z) || !isfinite(n)
     return full, cavity, n, Z, regen
 end
 
@@ -168,7 +164,7 @@ function process_weights(w)
     return W, n, Z
 end
 
-function simulate!(particles, model)
+function simulate!(particles, model::MSCModel)
     # it is quite a bit faster to convert to MomMBM on beforehand
     m = MomMBM(model.S)
     Threads.@threads for i=1:length(particles)
@@ -184,17 +180,17 @@ end
 # currently not used (mutating instead)
 # note this one actually also mutates the particles array, but not the
 # particles themselves...
-function simulate(particles, model)
-    m = MomMBM(model.S)
-    Threads.@threads for i=1:length(particles)
-        particles[i] = simfun(model, m)
-    end
-end
-
-function simfun(model, m)
-    S = randbranches(m, model.q)
-    p = Particle(S, logpdf(model, S))
-end
+#function simulate(particles, model::MSCModel)
+#    m = MomMBM(model.S)
+#    Threads.@threads for i=1:length(particles)
+#        particles[i] = simfun(model, m)
+#    end
+#end
+#
+#function simfun(model, m)
+#    S = randbranches(m, model.q)
+#    p = Particle(S, logpdf(model, S))
+#end
 
 function logweights(particles, model)
     w = zeros(length(particles))
@@ -203,5 +199,37 @@ function logweights(particles, model)
         w[i] = logpdf(model, p.S) - p.w
     end
     return w
+end
+
+
+# For a fixed topology, the following should do. We simply use the BranchModel
+# instead of the MSCModel, and let randbranches! only draw 
+function EPABCIS(data, b::Branches, prior::BranchModel{T,V}, N; 
+                 λ=0.1, prunetol=1e-9, kwargs...) where {T,V}
+    sites = Vector{BranchModel{T,V}}(undef, length(data)+1)
+    siteC = fill(-Inf, length(data))
+    sites[end] = prior  # last entry is the prior
+    sims = map(_->Particle(copy(b), -Inf), 1:N)
+    siteupdate = ImportanceSampler(N=N, sims=sims; kwargs...)
+    alg = EPABC(data=data, model=prior, sites=sites, siteC=siteC,
+                siteupdate=siteupdate, λ=λ, prunetol=prunetol)
+end
+
+function simulate!(particles, model::BranchModel)
+    Threads.@threads for i=1:length(particles)
+        simfun!(particles[i], model)
+    end
+end
+
+function simfun!(p, model::BranchModel)
+    randbranches!(p.S, model)
+    p.w = logpdf(model, p.S)
+end
+
+function randbranches!(branches, q::BranchModel)
+    for (i,x) in enumerate(branches)
+        d = randbranch(q, x[1], x[2])
+        branches[i] = (x[1], x[2], d)
+    end
 end
 

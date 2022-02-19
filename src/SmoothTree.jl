@@ -4,7 +4,7 @@ using NewickTree, StatsBase, Parameters, Random, StatsFuns, Distributions
 using Printf, ProgressBars, SpecialFunctions, ThreadTools
 import Distributions: logpdf
 export CCD, MSC, Locus, randtree, randsplits, randbranches, traceback
-export setdistance!, setdistance_internal!
+export setdistance!, setdistance_internal!, maptree
 export NatMBM, MomMBM, MSCModel, BranchModel, ep!, pep!, EPABC, EPABCIS
 export ranking, clademap, BetaSplitTree, cladesize, splitsize, rootclade
 export relabel, gaussian_mom2nat, topologize
