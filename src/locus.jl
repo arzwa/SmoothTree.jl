@@ -1,5 +1,5 @@
-# by convention we assume genes are labeled "species_gene"
-speciesname(x) = string(split(x, "_")[1])
+# by convention we assume genes are labeled "species__gene"
+speciesname(x) = string(split(x, "__")[1])
 
 """
 Stores the tree data for a single locus.

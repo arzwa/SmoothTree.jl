@@ -4,13 +4,24 @@ using StatsBase, Distributions, Plots, StatsPlots, LaTeXStrings, Measures
 using Serialization
 theme(:wong2)
 default(gridstyle=:dot, legend=false, framestyle=:box, title_loc=:left, titlefont=7)
-data_ = deserialize("docs/data/yeast-rokas/ccd-ufboot.jls")
-trees = readnw.(readlines("docs/data/yeast.mltrees"))
-tmap  = clademap(trees[1])
+
+#trees = map(readdir("docs/data/yeast-rokas/mb", join=true)) do f
+#    @info f
+#    ts = readnw.(readlines(f))
+#    ts = SmoothTree.rootall!(ts, "Calb")
+#    countmap(ts)
+#end
+#serialize("docs/data/yeast-rokas/ccd-mb.jls", trees)
+
+mbdata  = deserialize("docs/data/yeast-rokas/mb.jls")
+ufbdata = deserialize("docs/data/yeast-rokas/ufboot.jls")
+mltrees = readnw.(readlines("docs/data/yeast-rokas/yeast.mltrees"))
+tmap  = clademap(mltrees[1])
 
 # we can compare using ML gene trees against acknowledging uncertainty
-data1 = Locus.(data_, Ref(tmap), 1e-6, -1.5)
-data2 = Locus.(trees, Ref(tmap), 1e-6, -1.5)
+data1 = Locus.(mbdata, Ref(tmap), 1e-6, -1.5)
+#data1 = Locus.(ufbdata, Ref(tmap), 1e-6, -1.5)
+data2 = Locus.(mltrees, Ref(tmap), 1e-6, -1.5)
 
 μ, V = log(2.), 5.
 root   = UInt16(sum(keys(tmap)))
@@ -35,12 +46,8 @@ trace3 = ep!(alg3, 5)
 
 # and the other way around
 tree   = SmoothTree.getbranches(smple2[1][1], tmap)
-alg4   = EPABCIS(data1, tree, θprior, 100000, target=2000, miness=10., λ=0.1, α=1e-3)
+alg4   = EPABCIS(data0, tree, θprior, 100000, target=2000, miness=10., λ=0.1, α=1e-3)
 trace4 = ep!(alg4, 5)
-
-# tree height
-hs = [getheights(SmoothTree.gettree(randbranches(alg1.model), tmap)) for i=1:10000]
-quantile(map(x->x[0x0003], filter(x->haskey(x, 0x0003), hs)), [0.025, 0.975])
 
 # posterior analysis
 algs   = [alg1, alg2, alg3, alg4]
@@ -49,6 +56,16 @@ models = [alg1.model, alg2.model,
           MSCModel(alg2.model.S, alg4.model)]
 traces = [trace1, trace2, trace3, trace4]
 labels = ["CCD", "ML trees", "ML trees (S₁)", "CCD (S₂)"] 
+
+# tree height
+function totallength(m, N=10000)
+    hs = map(1:N) do _
+        sum(last.(filter(x->isfinite(x[end]), randbranches(m))))
+    end
+    mean(hs), quantile(hs, [0.025, 0.975])
+end
+
+map(totallength, models)
 
 species = Dict("Scas"=>"S. castellii", "Smik"=>"S. mikatae", 
                "Spar"=>"S. paradoxus", "Skud"=>"S. kudriavzevii", 
@@ -100,7 +117,7 @@ for (i,x) in enumerate(sort(comp, rev=true))
     plot!(pl3, [i, i], quantile(x[2], [0.025, 0.975]), color=:lightgray, lw=4)
     scatter!(pl3, [(i, x[1])], color=:black)
 end
-plot(pl3, size=(300,200))
+plot(pl3, size=(300,200), ylim=(0,1))
 
 #plot(pl1, pl3, layout=grid(1,2, widths=[0.7,0.3]), size=(700,220), bottom_margin=3mm)
 lay = @layout [grid(1,4, widths=[0.2,0.8/3,0.8/3,0.8/3]) ; grid(1,3)]
@@ -119,3 +136,26 @@ savefig("docs/img/yeast-panel.pdf")
 # simulation suggest that almost 90% of the *true* gene trees matches
 # the species tree.
 
+# get proportionmap for full posterior over gene trees
+X = mbdata[1]
+for i=2:length(mbdata)
+    for (k,v) in mbdata[i]
+        !haskey(X, k) && (X[k] = 0)
+        X[k] += v
+    end
+end
+Z = sum(values(X))
+Y = Dict(k=>v/Z for (k,v) in X)
+
+alg = algs[1]
+pps = SmoothTree.postpredsim(alg.model, data1, 1000)
+obs = proportionmap(trees)
+comp = [(haskey(obs, k) ? obs[k] : 0, v, (haskey(Y, k) ? Y[k] : 0)) for (k,v) in pps]
+comp = filter(x->x[1] > 0 || mean(x[2]) > 0.001, comp)
+pl3 = plot(ylabel=L"P", xlabel=L"G", xtickfont=7, xticks=0:2:20)
+for (i,x) in enumerate(sort(comp, rev=true))
+    plot!(pl3, [i, i], quantile(x[2], [0.025, 0.975]), color=:lightgray, lw=4)
+    scatter!(pl3, [(i, x[1])], color=:black)
+    scatter!(pl3, [(i, x[3])], color=:lightgray)
+end
+plot(pl3, size=(300,200), ylim=(0,1))

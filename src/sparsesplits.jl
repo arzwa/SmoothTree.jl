@@ -140,17 +140,17 @@ absolute tolerance `atol`)
 """
 function prune(x::SparseSplits{T,V}, atol) where {T,V}
     d = Dict{T,V}()
+    ks = x.k
     for (k,v) in x.splits
         s = splitsize(x.γ, k)
-        !(isapprox(v, x.η0[s], atol=atol)) && (d[k] = v)
+        if !isapprox(v, x.η0[s], atol=atol)
+            d[k] = v
+        else
+            ks[s] += 1
+        end
     end 
     # should we adjust η0?
-    SparseSplits(d, x.n, length(d), x.η0, x.ref) 
+    SparseSplits(d, x.γ, x.n, ks, x.η0, x.ref) 
 end
 
-function prune!(x::SparseSplits, atol)
-    for (k,v) in x.splits
-        s = splitsize(x.γ, k)
-        isapprox(v, x.η0[s], atol=atol) && delete!(x.splits, k)
-    end 
-end
+# we have no in-place method
