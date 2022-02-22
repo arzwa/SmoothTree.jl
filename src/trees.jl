@@ -23,7 +23,7 @@ const Splits{T} = Vector{Tuple{T,T}}
 
 function getsplits(n::DefaultNode{T}, m::AbstractDict) where T
     splits = Splits{T}()
-    _getsplits(splits, tree, m)
+    _getsplits(splits, n, m)
     return splits
 end
 

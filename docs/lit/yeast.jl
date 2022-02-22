@@ -5,16 +5,16 @@ using Serialization
 theme(:wong2)
 default(gridstyle=:dot, legend=false, framestyle=:box, title_loc=:left, titlefont=7)
 
-#trees = map(readdir("docs/data/yeast-rokas/mb", join=true)) do f
+#trees = map(readdir("docs/data/yeast-rokas/yeast-rokas-mb/trees", join=true)) do f
 #    @info f
-#    ts = readnw.(readlines(f))
+#    ts = readnw.(readlines(f)[1001:end])
 #    ts = SmoothTree.rootall!(ts, "Calb")
 #    countmap(ts)
 #end
-#serialize("docs/data/yeast-rokas/ccd-mb.jls", trees)
+#serialize("docs/data/yeast-rokas/mb.jls", trees)
 
 mbdata  = deserialize("docs/data/yeast-rokas/mb.jls")
-ufbdata = deserialize("docs/data/yeast-rokas/ufboot.jls")
+#ufbdata = deserialize("docs/data/yeast-rokas/ufboot.jls")
 mltrees = readnw.(readlines("docs/data/yeast-rokas/yeast.mltrees"))
 tmap  = clademap(mltrees[1])
 
@@ -25,7 +25,7 @@ data2 = Locus.(mltrees, Ref(tmap), 1e-6, -1.5)
 
 μ, V = log(2.), 5.
 root   = UInt16(sum(keys(tmap)))
-Sprior = NatMBM(CCD(unique(trees), tmap), BetaSplitTree(-1.5, cladesize(root)), 1.)
+Sprior = NatMBM(CCD(unique(mltrees), tmap), BetaSplitTree(-1.5, cladesize(root)), 1.)
 θprior = BranchModel(root, gaussian_mom2nat([μ, V]), inftips=collect(keys(tmap)))
 model  = MSCModel(Sprior, θprior)
 
@@ -46,7 +46,7 @@ trace3 = ep!(alg3, 5)
 
 # and the other way around
 tree   = SmoothTree.getbranches(smple2[1][1], tmap)
-alg4   = EPABCIS(data0, tree, θprior, 100000, target=2000, miness=10., λ=0.1, α=1e-3)
+alg4   = EPABCIS(data1, tree, θprior, 100000, target=2000, miness=10., λ=0.1, α=1e-3)
 trace4 = ep!(alg4, 5)
 
 # posterior analysis
@@ -65,7 +65,7 @@ function totallength(m, N=10000)
     mean(hs), quantile(hs, [0.025, 0.975])
 end
 
-map(totallength, models)
+tl = map(totallength, models)
 
 species = Dict("Scas"=>"S. castellii", "Smik"=>"S. mikatae", 
                "Spar"=>"S. paradoxus", "Skud"=>"S. kudriavzevii", 
@@ -109,7 +109,7 @@ end |> x->plot(x..., size=(650,350))
 
 alg = algs[1]
 pps = SmoothTree.postpredsim(alg.model, data1, 1000)
-obs = proportionmap(trees)
+obs = proportionmap(mltrees)
 comp = [(haskey(obs, k) ? obs[k] : 0, v) for (k,v) in pps]
 comp = filter(x->x[1] > 0 || mean(x[2]) > 0.001, comp)
 pl3 = plot(ylabel=L"P", xlabel=L"G", xtickfont=7, xticks=0:2:20)
@@ -122,7 +122,7 @@ plot(pl3, size=(300,200), ylim=(0,1))
 #plot(pl1, pl3, layout=grid(1,2, widths=[0.7,0.3]), size=(700,220), bottom_margin=3mm)
 lay = @layout [grid(1,4, widths=[0.2,0.8/3,0.8/3,0.8/3]) ; grid(1,3)]
 p = plot(ps..., p1, p2, pl3, size=(700,400), layout=lay,
-         bottom_margin=3mm, guidefont=8)
+         bottom_margin=3mm, guidefont=9)
 for (i,c) in enumerate('A':'G')
     title!(p[i], "($c)") 
 end

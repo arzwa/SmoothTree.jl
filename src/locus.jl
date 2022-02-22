@@ -8,10 +8,12 @@ struct Locus{D,T,V}
     data::D                       # a CCD or MBM
     lmap::BiMap{T,V}              # gene <=> clade index bimap
     init::Dict{T,Vector{T}}       # species tree taxa => extant gene tree clades map
+    rooted::Bool
 end
 
 Base.length(x::Locus) = length(x.lmap)
 Base.show(io::IO, x::Locus{D}) where D = write(io, "Locus $((length(x), D))")
+randtree(locus::Locus) = randtree(locus.data, locus.lmap)
 
 """
     Locus(trees, spmap)
@@ -19,10 +21,13 @@ Base.show(io::IO, x::Locus{D}) where D = write(io, "Locus $((length(x), D))")
 Get a conditional clade distribution (CCD) for the tree collection and put it
 in the Locus data structure.
 """
-function Locus(trees, spmap)
+function Locus(trees, spmap::BiMap{T}; rooted=true) where T
     lmap, init = getmaps(trees, spmap)
+    if !rooted
+        trees = rootall(trees, lmap[one(T)]) 
+    end
     ccd = CCD(trees, lmap)
-    Locus(ccd, lmap, init)
+    Locus(ccd, lmap, init, rooted)
 end
 
 """
@@ -31,12 +36,15 @@ end
 Get a `β`-splitting posterior MBM with prior concentration `α` for the tree
 collection and put it in the Locus data structure.
 """
-function Locus(trees, spmap, α, β)
+function Locus(trees, spmap, α, β; rooted=true)
     lmap, init = getmaps(trees, spmap)
+    if !rooted
+        trees = rootall(trees, lmap[one(T)]) 
+    end
     ccd = CCD(trees, lmap)
     bsd = BetaSplitTree(β, length(lmap))
     mbm = MomMBM(ccd, bsd, α)
-    Locus(mbm, lmap, init)
+    Locus(mbm, lmap, init, rooted)
 end
 
 """

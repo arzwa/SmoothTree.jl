@@ -56,16 +56,17 @@ logccp(ccd, γ, δ) = log(ccd[γ,δ]) - log(ccd[γ])
 # Constructors
 # ------------
 # from a countmap
-CCD(trees::AbstractDict, lmap, ::Type{T}) where T = CCD(collect(trees), lmap, T)
+CCD(trees::AbstractDict, lmap, ::Type{T}; rooted=true) where T = 
+    CCD(collect(trees), lmap, T, rooted=rooted)
 
 # For a single tree
-CCD(tree::Node, args...) = CCD([tree], args...)
+CCD(tree::Node, args...; kwargs...) = CCD([tree], args...; kwargs...)
 
 # from a vector of (pairs of) trees
-function CCD(trees, lmap, ::Type{T}=Int64) where T
+function CCD(trees, lmap, ::Type{T}=Float64; rooted=true) where T
     ccd = initccd(lmap, T)
     for tree in trees
-        addtree!(ccd, lmap, tree)
+        rooted ? addtree!(ccd, lmap, tree) : addunrooted!(ccd, lmap, tree)
     end
     return ccd
 end
@@ -84,6 +85,7 @@ end
 addtree!(ccd::CCD, lmap, tpair) = addtree!(ccd, lmap, tpair[1], tpair[2])  
 function addtree!(ccd::CCD, lmap, tree::Node, w=1)
     @unpack cmap, smap = ccd
+    @assert NewickTree.isbifurcating(tree)
     function walk(n)
         if isleaf(n)
             leaf = lmap[name(n)] 
@@ -103,7 +105,21 @@ function addtree!(ccd::CCD, lmap, tree::Node, w=1)
     walk(tree)
 end
 
-# For branches... actually very similar for splits...
+# NOTE, we assume the unrooted tree is represented as a rooted one!
+# XXX much too slow for big trees...
+addunrooted!(ccd::CCD, lmap, tpair) = addunrooted!(ccd, lmap, tpair[1], tpair[2])  
+function addunrooted!(ccd::CCD, lmap, tree::Node, w=1)
+    @assert NewickTree.isbifurcating(tree)
+    o = prewalk(tree)
+    m = length(o) - 2
+    for n in o
+        parent(n) == tree && continue
+        t = set_outgroup(n)
+        addtree!(ccd, lmap, t, w/m)
+    end
+end
+
+# For branches... actually very similar for splits... assumes rooted!
 function CCD(bs::Vector{Branches{T}}, ws::Vector{W}) where {T,W}
     ccd = initccd(bs[1], W)
     for (x, w) in zip(bs, ws)
@@ -210,3 +226,5 @@ function logpdf(ccd::CCD, trees::Dict)
     end
     return l
 end
+
+
