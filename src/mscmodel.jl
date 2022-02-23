@@ -53,6 +53,10 @@ Base.:*(a, x::MSCModel) = MSCModel(x.S * a, x.q * a)
 #    return node
 #end
 #
+#function randsplits(tree::SimpleNode{T}, init::V) where {T,V}
+#    _, splits = _coalsplits(tree, Splits{T}(), init) 
+#end
+
 ## simulate a species tree from the MSCModel
 ## speed-up by pre-allocating and indexing, not pushing to en empty array?
 randbranches(m::MSCModel) = randbranches(m.S, m.q)

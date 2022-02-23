@@ -96,9 +96,7 @@ function addtree!(ccd::CCD, lmap, tree::Node, w=1)
             rght = walk(n[2])
             clade = left + rght
             x = min(left, rght)
-            _update!(cmap, smap, clade, x)
-            cmap[clade] += w
-            smap[clade][x] += w
+            _update!(cmap, smap, clade, x, w)
             return clade
         end
     end
@@ -106,17 +104,86 @@ function addtree!(ccd::CCD, lmap, tree::Node, w=1)
 end
 
 # NOTE, we assume the unrooted tree is represented as a rooted one!
-# XXX much too slow for big trees...
 addunrooted!(ccd::CCD, lmap, tpair) = addunrooted!(ccd, lmap, tpair[1], tpair[2])  
+
+# naive implementation
+#function _addunrooted!(ccd::CCD, lmap, tree::Node, w=1)
+#    @assert NewickTree.isbifurcating(tree)
+#    o = prewalk(tree)
+#    m = length(o) - 2
+#    for n in o
+#        parent(n) == tree && continue
+#        t = set_outgroup(n)
+#        addtree!(ccd, lmap, t, w/m)
+#    end
+#end
+
+# Add an unrooted tree to the CCD. Note that with this, we could in principle
+# combine rooted and unrooted trees in the CCD, although in practice one will
+# rarely have occasion for that. 
+# See the sketch in `docs/img/unrooted-ccd.pdf` for the logic.
 function addunrooted!(ccd::CCD, lmap, tree::Node, w=1)
     @assert NewickTree.isbifurcating(tree)
-    o = prewalk(tree)
-    m = length(o) - 2
-    for n in o
-        parent(n) == tree && continue
-        t = set_outgroup(n)
-        addtree!(ccd, lmap, t, w/m)
+    @unpack cmap, smap = ccd
+    o = ccd.root
+    m = length(prewalk(tree)) - 2  # possible rootings
+    function walk(n)
+        if isleaf(n)
+            leaf = lmap[name(n)] 
+            cmap[leaf] += w
+            return leaf, 1
+        else
+            # recurse left and right down the pseudo-rooted tree
+            s1, b1 = walk(n[1])
+            s2, b2 = walk(n[2])
+            # clade below current node in pseudo-rooted tree
+            c1 = s1 + s2
+            # s3 is the complement of that clade, i.e. the clade defined by the
+            # bipartition in the unrooted tree induced by the branch leading to
+            # n in the pseudo-rooted tree
+            s3 = o - c1
+            # now s1, s2, s3 are the three clades defined by an internal node
+            # in the unrooted tree. In the rooted trees compatible with this
+            # unrooted tree, we can have (s1,s2|c1), (s1,s3|c2), (s2,s3|c3),
+            # (s1,c3|o), (s2,c2|o) and (s3,c1|o), the latter three are root
+            # splits
+            c2 = s1 + s3
+            c3 = s2 + s3
+            # we now add the implied root splits. Note we only add those root
+            # splits implied by putting the root on either of the two daughter
+            # branches of the current node in the pseudo-rooted tree, the
+            # rooting implied by putting the root on the parent branch (i.e.
+            # (s3,c1|o)) will be dealt with in the recursion
+            x2 = min(c2, o-c2)
+            x3 = min(c3, o-c3)
+            _update!(cmap, smap, o, x2, w/m)
+            # if we are dealing with the root node of the pseudo-rooted tree,
+            # x2 and x3 are the same, so we return here.
+            isroot(n) && return c1, b1 + b2
+            _update!(cmap, smap, o, x3, w/m)
+            # now for the non-root splits, already mentioned above. The main
+            # thing here is to properly compute the weights. For every split,
+            # we need to add it to the CCD weighted by the number of unrooted
+            # trees that contain that split. This is simply the number of
+            # different rootings possible in the 'direction' of the outgroup,
+            # and happens to be a function of the size of the outgroup clade.
+            # Specifically, if we have the tripartition (s1,s2,s3) and we are
+            # adding the (s1,s2|c1) split to the CCD, we need to count the
+            # number of rootings containing that split, which is `2|s3|-1`
+            b3 = cladesize(s3)
+            m1 = 2b1 - 1
+            m2 = 2b2 - 1
+            m3 = 2b3 - 1
+            x1 = min(s1, s2)
+            x2 = min(s1, s3)
+            x3 = min(s2, s3)
+            _update!(cmap, smap, c1, x1, (m3/m)*w)
+            _update!(cmap, smap, c2, x2, (m2/m)*w)
+            _update!(cmap, smap, c3, x3, (m1/m)*w)
+            return c1, b1 + b2
+        end
     end
+    walk(tree)
 end
 
 # For branches... actually very similar for splits... assumes rooted!
@@ -146,12 +213,18 @@ function addtree!(ccd::CCD, x::Branches, w)
 end
 
 # should we use defaultdict instead?
-function _update!(m1, m2, y, x)
-    !haskey(m1, y) && (m1[y] = 0)
+function _update!(m1::Dict{T,V}, m2, y, x, w=zero(V)) where {T,V}
+    if !haskey(m1, y) 
+        m1[y] = w
+    else
+        m1[y] += w
+    end
     if !haskey(m2, y) 
-        m2[y] = Dict(x=>0)
+        m2[y] = Dict(x=>w)
     elseif !haskey(m2[y], x)
-        m2[y][x] = 0
+        m2[y][x] = w
+    else
+        m2[y][x] += w
     end
 end
 

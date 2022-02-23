@@ -13,7 +13,8 @@ end
 
 Base.length(x::Locus) = length(x.lmap)
 Base.show(io::IO, x::Locus{D}) where D = write(io, "Locus $((length(x), D))")
-randtree(locus::Locus) = randtree(locus.data, locus.lmap)
+randtree(locus::Locus{<:CCD}) = randtree(locus.data, locus.lmap)
+randtree(locus::Locus{<:MomMBM}) = relabel!(randtree(locus.data), locus.lmap)
 
 """
     Locus(trees, spmap)
@@ -23,10 +24,7 @@ in the Locus data structure.
 """
 function Locus(trees, spmap::BiMap{T}; rooted=true) where T
     lmap, init = getmaps(trees, spmap)
-    if !rooted
-        trees = rootall(trees, lmap[one(T)]) 
-    end
-    ccd = CCD(trees, lmap)
+    ccd = CCD(trees, lmap, rooted=rooted)
     Locus(ccd, lmap, init, rooted)
 end
 
@@ -38,10 +36,7 @@ collection and put it in the Locus data structure.
 """
 function Locus(trees, spmap, α, β; rooted=true)
     lmap, init = getmaps(trees, spmap)
-    if !rooted
-        trees = rootall(trees, lmap[one(T)]) 
-    end
-    ccd = CCD(trees, lmap)
+    ccd = CCD(trees, lmap, rooted=rooted)
     bsd = BetaSplitTree(β, length(lmap))
     mbm = MomMBM(ccd, bsd, α)
     Locus(mbm, lmap, init, rooted)
