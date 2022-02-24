@@ -17,37 +17,81 @@ end
 
 Do `n` serial EP passes.
 """
-ep!(alg, n=1; kwargs...) = mapreduce(i->ep_serial!(alg; kwargs...), vcat, 1:n)
+function ep!(alg, n=1; kwargs...) 
+    trace = mapreduce(i->ep_serial!(alg; kwargs...), vcat, 1:n)
+    mtrace = vcat(first.(trace)...)
+    ztrace = vcat(last.(trace)...)
+    return mtrace, ztrace
+end
 
 # compute the model evidence
 evidence(alg) = sum(alg.siteC) + logpartition(alg.model) - logpartition(getprior(alg))
 
 # get the cavity wrt index i
-getcavity(alg, i) = isassigned(alg.sites, i) ? alg.model - alg.sites[i] : alg.model
+getcavity(alg, i) = isassigned(alg.sites, i) ? 
+    alg.model - alg.sites[i] : deepcopy(alg.model)
+uncavity(alg, i)  = isassigned(alg.sites, i) ? 
+    alg.model + alg.sites[i] : deepcopy(alg.model)
+
+# take out site i
+getcavity!(alg, i) = isassigned(alg.sites, i) ? 
+    sub!(alg.model, alg.sites[i]) : alg.model
+uncavity!(alg, i)  = isassigned(alg.sites, i) ? 
+    add!(alg.model, alg.sites[i]) : alg.model
 
 # get the prior
 getprior(alg) = alg.sites[end]
 
 # prune the model and site approximations
+# useful ?
 function prune!(alg)
     @unpack prunetol, sites = alg
     prunetol == 0. && return
     map(i->isassigned(sites, i) && prune!(sites[i], prunetol), 1:length(sites))
+    # inefficient
     alg.model = reduce(+, sites)
 end
 
 # update the model (main EP update)
-function update!(alg, full, cavity, i, lZ)
+#function update!(alg, full, cavity, i, lZ)
+#    @unpack λ, prunetol = alg
+#    # note we can do all model operations in a mutating fashion. The new model
+#    # `full` is independent in each generation.
+#    siteup = λ*(full - alg.model)
+#    prunetol != 0. && prune!(siteup, prunetol)  # should we?
+#    if isassigned(alg.sites, i) 
+#        alg.sites[i] = alg.sites[i] + siteup
+#    else siteup
+#        alg.sites[i] = siteup
+#    end
+#    alg.model = alg.model + siteup
+#    if isfinite(lZ)
+#        alg.siteC[i] = lZ - logpartition(alg.model) + logpartition(cavity)
+#    end
+#    # I am not 100% sure about the normalizing constant -- how does this play
+#    # with λ? should we use the updated model or not?
+#end
+
+# XXX alg.model should be the cavity when calling this function!
+function update!(alg, full, i, lZ)
     @unpack λ, prunetol = alg
-    siteup = λ * (full - alg.model)
+    @assert !(alg.model === full)
+    Zcav = isfinite(lZ) ? logpartition(alg.model) : -Inf
+    # here we mutate `full` to get `siteup`, which is the only thing we will
+    # need in the remainder (we no longer need full)
+    uncavity!(alg, i)
+    siteup = mul!(sub!(full, alg.model), λ)   # λ(q∗ - q)
     prunetol != 0. && prune!(siteup, prunetol)  # should we?
-    alg.sites[i] = isassigned(alg.sites, i) ? alg.sites[i] + siteup : siteup
-    alg.model = alg.model + siteup
-    if isfinite(lZ)
-        alg.siteC[i] = lZ - logpartition(alg.model) + logpartition(cavity)
+    add!(alg.model, siteup)  # mutates the model, to get the new approximation
+    if isassigned(alg.sites, i) 
+        add!(alg.sites[i], siteup)   # here we mutate the site, no problem
+    else siteup
+        alg.sites[i] = siteup  # new site, siteup is an independent object 
+        # since derived from `full`
     end
-    # I am not 100% sure about the normalizing constant -- how does this play
-    # with λ? should we use the updated model or not?
+    if isfinite(lZ)
+        alg.siteC[i] = lZ - logpartition(alg.model) + Zcav
+    end
 end
 
 
@@ -95,7 +139,7 @@ function EPABCIS(data, prior::MSCModel{T,V}, N;
     nbranch = 2ntaxa - 2
     sims = map(_->Particle(nbranch, T), 1:N)
     siteupdate = ImportanceSampler(N=N, sims=sims; kwargs...)
-    alg = EPABC(data=data, model=prior, sites=sites, siteC=siteC,
+    alg = EPABC(data=data, model=deepcopy(prior), sites=sites, siteC=siteC,
                 siteupdate=siteupdate, λ=λ, prunetol=prunetol)
 end
 
@@ -104,21 +148,24 @@ end
 
 Serial EP pass. When `rnd=true` the pass goes over the data in a random order. 
 """
-function ep_serial!(alg::EPABC{<:ImportanceSampler}; rnd=true) 
+function ep_serial!(alg::EPABC{<:ImportanceSampler}; rnd=true, traceit=10000) 
     rnge = rnd ? shuffle(1:length(alg.data)) : 1:length(alg.data)
     iter = ProgressBar(rnge)
     ev = n = -Inf
     regen = true
-    trace = map(iter) do i
+    mtrace = [alg.model]
+    Ztrace = [(ev, n)]
+    for (j, i) in enumerate(iter)
         desc = string(@sprintf("%4d %8.1f %9.3f %2d", i, n, ev, regen))
         set_description(iter, desc)
-        full, cavity, n, Z, regen = ep_iteration!(alg, i, regen)
-        update!(alg, full, cavity, i, Z) 
+        full, n, Z, regen = ep_iteration!(alg, i, regen)
+        update!(alg, full, i, Z) 
         ev = evidence(alg)
-        alg.model, ev, n
+        j % traceit == 0 && push!(mtrace, deepcopy(alg.model))
+        push!(Ztrace, (ev, n))
     end 
-    prune!(alg)
-    return trace
+    #prune!(alg)
+    return mtrace, Ztrace
 end
 
 """
@@ -130,25 +177,30 @@ function ep_iteration!(alg::EPABC{<:ImportanceSampler}, i, regen=true)
     @unpack siteupdate, data = alg
     @unpack sims, miness, N, α, target = siteupdate
     X = data[i]
-    cavity = getcavity(alg, i)
+    #cavity = getcavity(alg, i)
+    getcavity!(alg, i)
     if regen
-        simulate!(sims, cavity)
+        simulate!(sims, alg.model)
         w = zeros(N)
     else
-        w = logweights(sims, cavity)
+        w = logweights(sims, alg.model)
     end
     # note that in the general case we cannot recycle gene trees
     data_likelihood!(w, X, sims)
     W, n, Z = process_weights(w)
     if n < miness || !isfinite(Z) 
-        full = alg.model
+        full = uncavity(alg, i)
     else 
-        branches = getfield.(sims, :S)
-        full = matchmoments(branches, W, cavity, α)
+        branches = alltrees(sims)
+        full = matchmoments(branches, W, alg.model, α)
     end
+    # Note that `full` must be an independent object from the current model. At
+    # least, this is assumed in `update!`.
     regen = n < target || !isfinite(Z) || !isfinite(n)
-    return full, cavity, n, Z, regen
+    return full, n, Z, regen
 end
+
+alltrees(xs::Vector{Particle{T}}) where T = map(x->x.S, xs)
 
 function data_likelihood!(w, data, sims)
     Threads.@threads for j=1:length(w)

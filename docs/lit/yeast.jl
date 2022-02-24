@@ -23,7 +23,7 @@ data1 = Locus.(mbdata, Ref(tmap), 1e-6, -1.5)
 #data1 = Locus.(ufbdata, Ref(tmap), 1e-6, -1.5)
 data2 = Locus.(mltrees, Ref(tmap), 1e-6, -1.5)
 
-μ, V = log(2.), 5.
+μ, V = log(2.), 3.
 root   = UInt16(sum(keys(tmap)))
 Sprior = NatMBM(CCD(unique(mltrees), tmap), BetaSplitTree(-1.5, cladesize(root)), 1.)
 θprior = BranchModel(root, gaussian_mom2nat([μ, V]), inftips=collect(keys(tmap)))

@@ -6,8 +6,8 @@ using StatsBase, Distributions
     treesfile = joinpath(@__DIR__, "OG0006030.trees")
     #treesfile = joinpath(@__DIR__, "test/OG0006030.trees")
     trees = readnw.(readlines(treesfile))
-    trees = SmoothTree.rootall!(trees)
-    tmap  = clademap(trees)
+    trees = SmoothTree.rootall(trees)
+    tmap  = clademap(trees[1])
     ccd   = CCD(trees, tmap)
 
     @testset "Beta-splitting SparseSplits" begin

@@ -1,11 +1,10 @@
 """
     BranchModel{T,V}
 
-The `BranchModel` stores for each clade, potentially, a natural
-parameter vector, and has a fallback `η0` representing the natural
-parameter vector for unrepresented clades. For the global model, 
-the latter will be the prior. For an individual site `η0` will be
-zero.
+The `BranchModel` stores for each clade, potentially, a natural parameter
+vector, and has a fallback `η0` representing the natural parameter vector for
+unrepresented clades. For the global model, the latter will be the prior. For
+an individual site `η0` will be zero.
 """
 struct BranchModel{T,V}
     root ::T
@@ -14,17 +13,23 @@ struct BranchModel{T,V}
     inftips::Vector{T}
 end
 
-# initialize an empty branchmodel object
+# Initialize an empty branchmodel object.
 function BranchModel(root::T, η0::V; inftips=T[]) where {T,V} 
     BranchModel(root, Dict{Tuple{T,T},V}(), η0, inftips)
 end
 
-# some accessors
+# We define some accessor functions.
 Base.haskey(m::BranchModel, γ) = haskey(m.cmap, γ)
 Base.getindex(m::BranchModel, γ) = haskey(m, γ) ? m.cmap[γ] : m.η0
 Base.getindex(m::BranchModel, γ, δ) = m[(γ,δ)] 
 
-# A branch model should support a vector algebra
+
+# Linear operations
+# -----------------
+# A branch model should support a vector algebra. We can have these in two
+# flavors: non-mutating and mutating. The former being more elegant (and bug
+# proof), while the latter being more efficient.
+
 function Base.:+(x::BranchModel{T,V}, y::BranchModel{T,V}) where {T,V}
     clades = union(keys(x.cmap), keys(y.cmap))
     d = Dict(γ=>x[γ] .+ y[γ] for γ in clades)
@@ -42,6 +47,39 @@ function Base.:*(x::BranchModel{T,V}, a::V) where {T,V}
     d = Dict(γ=>a*v for (γ, v) in x.cmap)
     BranchModel(x.root, d, a*x.η0, x.inftips)
 end
+
+
+# Mutating linear operations 
+# --------------------------
+# Mind the prior contribution! For a represented branch `b` in `x` and an
+# unrepresented branch in `y`, one has to add `y.η0` to `x[b]` 
+
+function add!(x::BranchModel, y::BranchModel)
+    bs = union(keys(x.cmap), keys(y.cmap))
+    for b in bs
+        x.cmap[b] = x[b] .+ y[b]
+    end
+    x.η0 .+= y.η0
+    return x
+end
+
+function sub!(x::BranchModel, y::BranchModel)
+    bs = union(keys(x.cmap), keys(y.cmap))
+    for b in bs
+        x.cmap[b] = x[b] .- y[b]
+    end
+    x.η0 .-= y.η0
+    return x
+end
+
+function mul!(x::BranchModel{T,V}, a::V) where {T,V}
+    for b in collect(keys(x.cmap))
+        x.cmap[b] .*= a
+    end
+    x.η0 .*= a
+    return x
+end
+
 
 # moment <-> natural transformations
 # get a univariate gaussian from natural parameters
@@ -80,7 +118,7 @@ function matchmoments(branches, weights, cavity::BranchModel{T,V}) where {T,V}
     cavity_contribution!(d, cavity)
     # convert to natural parameters
     q = Dict(γ => suff2nat(v[2], v[3]) for (γ, v) in d)
-    BranchModel(cavity.root, q, cavity.η0, cavity.inftips)
+    BranchModel(cavity.root, q, copy(cavity.η0), cavity.inftips)
 end
 
 # recursively process a tree to get the sufficient statistics for

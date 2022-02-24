@@ -68,12 +68,14 @@ function NatMBM(x::CCD, β::BetaSplitTree, α::Real)
     NatMBM(β, smap, x.root)
 end
 
-# linear operations
+
+# Linear operations
+# =================
 # XXX note: these ignore the beta split prior distribution
 function Base.:+(x::NatMBM{T,V}, y::NatMBM{T,V}) where {T,V}
     d = Dict(γ=>v for (γ, v) in x.smap)
     for (γ, v) in y.smap
-        d[γ] = haskey(d, γ) ? d[γ] + v : v
+        d[γ] = haskey(d, γ) ? d[γ] + v : 1.0*v  # do the 1.0* to get a copy
     end
     NatMBM(x.beta, d, x.root) 
 end
@@ -91,6 +93,34 @@ function Base.:*(x::NatMBM{T,V}, a::V) where {T,V}
     NatMBM(x.beta, Dict(γ=>v*a for (γ,v) in x.smap), x.root)
 end
 
+
+# Linear operations, modifying in first argument
+# ==============================================
+# This is of couse much faster, at the expense of elegance.
+function mul!(x::NatMBM{T,V}, a::V) where {T,V}
+    for γ in collect(keys(x.smap))
+        mul!(x[γ], a) 
+    end
+    return x
+end
+
+function add!(x::NatMBM, y::NatMBM)
+    for (γ, v) in collect(y.smap)
+        haskey(x, γ) ? add!(x.smap[γ], v) : (x.smap[γ] =  1. * v)
+    end
+    return x
+end
+
+function sub!(x::NatMBM, y::NatMBM)
+    for (γ, v) in collect(y.smap)
+        haskey(x, γ) ? sub!(x.smap[γ], v) : (x.smap[γ] = -1. * v)
+    end
+    return x
+end
+
+
+# Sampling and probabilities etc.
+# ===============================
 # randtree for moment parameters
 randtree(model::MomMBM) = _randwalk(Node(model.root), model)
 
@@ -137,7 +167,7 @@ end
 
 function randsplit(m::NatMBM, γ)
     # a cherry clade has NaN entries in SparseSplits
-    haskey(m, γ) && !ischerry(γ) ? randsplit(nat2mom(m[γ])) : randsplit(m.beta, γ)
+    haskey(m, γ) && !ischerry(γ) ? randsplitnat(m[γ]) : randsplit(m.beta, γ)
 end
 
 # we implement logpdf for both Mom/Nat
@@ -175,37 +205,40 @@ splits with split probabilities indistinguishable from the probability
 of an unrepresented split to the latter (thereby removing the split
 from the set of explicitly represented splits).
 """
-function prune(x::M, atol) where {T,V,M<:AbstractMBM{T,V}}
-    newd = Dict{T,SparseSplits{T,V}}()
-    clades = Set(x.root)
-    # first we prune all splits with negligible probability
-    for (γ, s) in x.smap
-        newd[γ] = prune(s, atol)
-        union!(clades, keys(newd[γ].splits))
-    end
-    # then we prune clades which feature explicitly in none of the
-    # split distributions
-    toprune = setdiff(keys(newd), clades)
-    for γ in toprune
-        delete!(newd, γ)
-    end
-    return M(x.beta, newd, x.root)
-end
+#function prune(x::M, atol) where {T,V,M<:AbstractMBM{T,V}}
+#    newd = Dict{T,SparseSplits{T,V}}()
+#    clades = Set(x.root)
+#    # first we prune all splits with negligible probability
+#    for (γ, s) in x.smap
+#        newd[γ] = prune(s, atol)
+#        union!(clades, keys(newd[γ].splits))
+#    end
+#    # then we prune clades which feature explicitly in none of the
+#    # split distributions
+#    toprune = setdiff(keys(newd), clades)
+#    for γ in toprune
+#        delete!(newd, γ)
+#    end
+#    return M(x.beta, newd, x.root)
+#end
 
 function prune!(x::M, atol) where {T,V,M<:AbstractMBM{T,V}}
     clades = Set(x.root)
+    empty = Set{T}()
     for (γ, s) in x.smap
-        x.smap[γ] = prune(s, atol)
+        y = prune(s, atol)
+        x.smap[γ] = y
         # all splits with non-negligible probabilities are to be kept
         # note that we also need to keep the complements, which are
         # not in the split distribution of γ but may have their own
         # split distribution in the smap!
-        union!(clades, keys(s.splits))
-        union!(clades, γ .- keys(s.splits))  
+        union!(clades, keys(y.splits))
+        union!(clades, γ .- keys(y.splits))  
+        length(y.splits) == 0 && union!(empty, γ)
     end
     # those clades nowhere seen will be deleted
     toprune = setdiff(keys(x.smap), clades)  
-    for γ in toprune
+    for γ in union(toprune, empty)
         delete!(x.smap, γ)
     end
 end

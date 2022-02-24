@@ -125,7 +125,7 @@ end
 
 plot(hcat(Zs...), label=reshape(αs, 1, 7), legend=:bottomleft, ylabel=L"Z", xlabel="iteration")
 hline!([ev], ls=:dot, color=:black)
-savefig("docs/img/three-taxa-alpha-Z.pdf")
+#savefig("docs/img/three-taxa-alpha-Z.pdf")
 
 λs = [0.01, 0.05, 0.1, 0.2, 0.5]
 Zs = map(λs) do λ

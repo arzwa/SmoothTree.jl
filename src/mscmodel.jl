@@ -25,6 +25,25 @@ Base.:-(x::MSCModel, y::MSCModel) = MSCModel(x.S - y.S, x.q - y.q)
 Base.:*(x::MSCModel, a) = MSCModel(x.S * a, x.q * a)
 Base.:*(a, x::MSCModel) = MSCModel(x.S * a, x.q * a)
 
+function add!(x::MSCModel, y::MSCModel)
+    add!(x.S, y.S)
+    add!(x.q, y.q)
+    return x
+end
+
+function sub!(x::MSCModel, y::MSCModel)
+    sub!(x.S, y.S)
+    sub!(x.q, y.q)
+    return x
+end
+
+function mul!(x::MSCModel, a)
+    mul!(x.S, a)
+    mul!(x.q, a)
+    return x
+end
+
+
 # efficiency of randtree/randbranches is similar
 # randtree somewhat less efficient, but for larger models with more represented
 # splits the difference is negligible, for instance

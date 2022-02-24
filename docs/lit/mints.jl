@@ -42,27 +42,32 @@ nepetoideae = readnw(readline("docs/data/mints/nepetoideae.nw"))
 taxa = name.(getleaves(nepetoideae))
 smap = clademap(taxa, UInt32)
 data = deserialize("docs/data/mints/mb1000.jls")
+root = UInt32(sum(keys(smap)))
 
 loci = Locus.(data, Ref(smap), 1e-6, -1.0, rooted=false)
 
 # now, in the unrooted case, and with missing taxa, it is less straightforward
 # to obtain an informative species tree prior from the gene trees.
-complete = filter(x->length(x.lmap) == 24, loci)
-smple = mapreduce(x->randtree(x, 100), vcat, complete)
-smple = SmoothTree.rootall(smple)
+#complete = filter(x->length(x.lmap) == 24, loci)
+#smple = mapreduce(x->randtree(x, 100), vcat, complete)
+#smple = SmoothTree.rootall(smple)
+#Sprior = NatMBM(CCD(smple, smap, rooted=false), BetaSplitTree(-1.0, 24), 0.001)
 
-root = UInt32(sum(keys(smap)))
-Sprior = NatMBM(CCD(smple, smap, rooted=false), BetaSplitTree(-1.5, 24), 0.001)
-θprior = BranchModel(root, SmoothTree.gaussian_mom2nat([0.,5]))
-model  = MSCModel(Sprior, θprior)
+# or derived from the concat tree
+Sprior = NatMBM(CCD(nepetoideae, smap), BetaSplitTree(-1.0, 24), 10.)
 
 # a sample from the prior
-maprior = ranking(randtree(Sprior, 10000))
+maprior = ranking(relabel.(randtree(Sprior, 10000), Ref(smap)))
+
+# the rest of the model
+θprior = BranchModel(root, SmoothTree.gaussian_mom2nat([0.,3]))
+model  = MSCModel(Sprior, θprior)
 
 # EP-ABC
-alg1   = EPABCIS(loci[1:20], model, 10000, target=2000, miness=10., λ=0.1,
-                 α=1e-3, prunetol=1e-5)
-trace1 = ep!(alg1, 3)
+alg1   = EPABCIS(loci[1:10], model, 10000, target=2000, miness=10., λ=0.1,
+                 α=1e-3, prunetol=1e-4)
+
+trace1 = ep!(alg1, 3, traceit=10)
 
 smple1 = relabel.(randtree(alg1.model.S, 10000), Ref(smap)) |> ranking
 
