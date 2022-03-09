@@ -37,9 +37,11 @@ serialize("docs/data/mints/mb1000.jls", data)
 # analysis
 using Pkg; Pkg.activate(@__DIR__)
 using SmoothTree, NewickTree, ThreadTools, StatsBase, Serialization, Plots
-default(titleloc=:left, titlefont=9)
-nepetoideae = readnw(readline("docs/data/mints/nepetoideae.nw"))
-taxa = name.(getleaves(nepetoideae))
+using Distributions, StatsPlots
+default(gridstyle=:dot, legend=false, title_loc=:left, titlefont=8, framestyle=:box)
+tre1 = readnw(readline("docs/data/mints/nepetoideae1.nw"))
+tre2 = readnw(readline("docs/data/mints/nepetoideae2.nw"))
+taxa = name.(getleaves(tre1))
 smap = clademap(taxa, UInt32)
 data = deserialize("docs/data/mints/mb1000.jls")
 root = UInt32(sum(keys(smap)))
@@ -54,21 +56,36 @@ loci = Locus.(data, Ref(smap), 1e-6, -1.0, rooted=false)
 #Sprior = NatMBM(CCD(smple, smap, rooted=false), BetaSplitTree(-1.0, 24), 0.001)
 
 # or derived from the concat tree
-Sprior = NatMBM(CCD(nepetoideae, smap), BetaSplitTree(-1.0, 24), 10.)
+Sprior = NatMBM(CCD([tre1, tre2], smap), BetaSplitTree(-1.5, 24), 1.)
 
 # a sample from the prior
 maprior = ranking(relabel.(randtree(Sprior, 10000), Ref(smap)))
 
 # the rest of the model
-θprior = BranchModel(root, SmoothTree.gaussian_mom2nat([0.,3]))
+θprior = BranchModel(root, SmoothTree.gaussian_mom2nat([0.,1]))
 model  = MSCModel(Sprior, θprior)
 
 # EP-ABC
-alg1   = EPABCIS(loci[1:10], model, 10000, target=2000, miness=10., λ=0.1,
-                 α=1e-3, prunetol=1e-4)
+alg1   = EPABCIS(loci, model, 50000, target=100, miness=10., λ=0.1,
+                 α=1e-5, prunetol=1e-6, c=0.95)
 
-trace1 = ep!(alg1, 3, traceit=10)
+trace1 = ep!(alg1, 2)
+
+θprior = BranchModel(root, SmoothTree.gaussian_mom2nat([0.,1]))
+tree = SmoothTree.getbranches(tre1, smap)
+alg2 = EPABCIS(loci, tree, θprior, 10000, target=200, miness=10., λ=0.1,
+                 α=1e-3, prunetol=1e-4)
+trace = ep!(alg2, 3, traceit=10)
 
 smple1 = relabel.(randtree(alg1.model.S, 10000), Ref(smap)) |> ranking
 
-plot([plot(k, transform=true, title=v) for (k,v) in smple1[1:9]]..., size=(900,1200))
+plot([plot(k, transform=true, title=v) for (k,v) in smple1[1:3]]..., size=(900,1200))
+
+alg = alg1
+S = smple1[1][1]
+bs = SmoothTree.getbranchapprox(alg.model.q, SmoothTree.getsplits(S, smap))
+bs = filter(x->!SmoothTree.isleafclade(x[2]), bs)
+map(bs) do (γ, δ, d)
+    plot(LogNormal(0, 1.), fill=true, color=:lightgray, xlim=(0,10))
+    plot!(LogNormal(d.μ, d.σ), color=:black)
+end |> x->plot(x..., size=(1200,800))

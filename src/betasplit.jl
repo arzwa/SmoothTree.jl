@@ -54,7 +54,7 @@ end
 # unnormalized beta-splitting density (n,i)
 function betasplitf(β, n, i) 
     p = (2i == n ? 0.5 : 1.0)
-    β == Inf && return p * binomial(n,i)/_ns(n) 
+    β == Inf && return p * binomial(n,i)/(2^(n-1)-1)
     p * gamma(β+1+i)*gamma(β+1+n-i)/(gamma(i+1)*gamma(n-i+1))
 end
 

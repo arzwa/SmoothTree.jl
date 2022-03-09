@@ -4,13 +4,13 @@ using SmoothTree, NewickTree, StatsBase, Printf, Serialization, DataFrames, CSV
 
 outdir = mkpath("docs/data/anomalyzone-out")
 
-ntaxa = 5
+ntaxa = 6
 config = (ntaxa=ntaxa, 
           θ=1/(ntaxa-1),
-          N=100, 
+          N=200, 
           nparticle=50000,
           miness=5.,
-          target=500.,
+          target=200.,
           β=-1.5,  
           μ=0.5,
           V=2.,
@@ -63,7 +63,7 @@ model = MSCModel(Sprior, θprior)
 
 results = map(1:config.nrun) do i
     alg = EPABCIS(data, model, config.nparticle, target=config.target,
-                  miness=config.miness, λ=config.λ, α=config.α)
+                  miness=config.miness, λ=config.λ, α=config.α, c=0.95)
     trace = ep!(alg, config.npass)
     # check MAP tree
     smple = ranking(relabel.(randtree(alg.model.S, 10000), Ref(m)))

@@ -173,10 +173,10 @@ end
 
 # Get the Gaussian approximations for the branch lengths under the model given
 # a tree.
-function getbranchapprox(model, splits::Splits)
+function getbranchapprox(q, splits::Splits)
     branches = mapreduce(x->[x, (x[1], x[1]-x[2])], vcat, splits)
     map(branches) do (γ, δ)
-        μ, V = gaussian_nat2mom(model.q[(γ, δ)])
+        μ, V = gaussian_nat2mom(q[(γ, δ)])
         (γ, δ, Normal(μ, √V))
     end
 end

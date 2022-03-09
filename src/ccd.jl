@@ -292,7 +292,7 @@ end
 logpdf(ccd::CCD, trees::AbstractVector) = mapreduce(t->logpdf(ccd, t), +, trees)
 
 # for a countmap
-function logpdf(ccd::CCD, trees::Dict)
+function logpdf(ccd, trees::Dict)
     l = 0.
     for (tree, count) in trees
         l += count*logpdf(ccd, tree)

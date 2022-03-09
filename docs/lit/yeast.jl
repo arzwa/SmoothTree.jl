@@ -23,17 +23,19 @@ data1 = Locus.(mbdata, Ref(tmap), 1e-6, -1.5)
 #data1 = Locus.(ufbdata, Ref(tmap), 1e-6, -1.5)
 data2 = Locus.(mltrees, Ref(tmap), 1e-6, -1.5)
 
-μ, V = log(2.), 3.
+μ, V = log(2.), 5.
 root   = UInt16(sum(keys(tmap)))
 Sprior = NatMBM(CCD(unique(mltrees), tmap), BetaSplitTree(-1.5, cladesize(root)), 1.)
 θprior = BranchModel(root, gaussian_mom2nat([μ, V]), inftips=collect(keys(tmap)))
 model  = MSCModel(Sprior, θprior)
 
-alg1   = EPABCIS(data1, model, 100000, target=2000, miness=10., λ=0.1, α=1e-3)
+alg1   = EPABCIS(data1, model, 10000, target=200, miness=10., λ=0.1, α=1e-4, c=0.95)
 trace1 = ep!(alg1, 5)
+Z1     = first.(trace1[2])
 
-alg2   = EPABCIS(data2, model, 100000, target=2000, miness=10., λ=0.1, α=1e-3)
+alg2   = EPABCIS(data2, model, 10000, target=200, miness=10., λ=0.1, α=1e-4, c=0.95)
 trace2 = ep!(alg2, 5)
+Z2     = first.(trace2[2])
 
 # posterior inspection
 smple1 = relabel.(randtree(alg1.model.S, 10000), Ref(tmap)) |> ranking
@@ -41,20 +43,22 @@ smple2 = relabel.(randtree(alg2.model.S, 10000), Ref(tmap)) |> ranking
 
 # now should estimate Z for both data sets with map topology of the other
 tree   = SmoothTree.getbranches(smple1[1][1], tmap)
-alg3   = EPABCIS(data2, tree, θprior, 100000, target=2000, miness=10., λ=0.1, α=1e-3)
+alg3   = EPABCIS(data2, tree, θprior, 10000, target=200, miness=10., λ=0.1, α=1e-4, c=0.95)
 trace3 = ep!(alg3, 5)
+Z3     = first.(trace3[2])
 
 # and the other way around
 tree   = SmoothTree.getbranches(smple2[1][1], tmap)
-alg4   = EPABCIS(data1, tree, θprior, 100000, target=2000, miness=10., λ=0.1, α=1e-3)
+alg4   = EPABCIS(data1, tree, θprior, 10000, target=200, miness=10., λ=0.1, α=1e-4, c=0.95)
 trace4 = ep!(alg4, 5)
+Z4     = first.(trace4[2])
 
 # posterior analysis
 algs   = [alg1, alg2, alg3, alg4]
 models = [alg1.model, alg2.model, 
           MSCModel(alg1.model.S, alg3.model), 
           MSCModel(alg2.model.S, alg4.model)]
-traces = [trace1, trace2, trace3, trace4]
+traces = [Z1, Z2, Z3, Z4]
 labels = ["CCD", "ML trees", "ML trees (S₁)", "CCD (S₂)"] 
 
 # tree height
@@ -66,46 +70,34 @@ function totallength(m, N=10000)
 end
 
 tl = map(totallength, models)
+# 4-element Vector{Tuple{Float64, Vector{Float64}}}:                            
+# (132.99138458652195, [48.48432912801099, 319.23620896133866])
+# (48.643028606774784, [18.733021202619106, 111.61887479218292])
+# (142.94215527088323, [42.527874213965546, 435.37909219648645])
+# (109.58827908634352, [44.11279716169171, 235.50613344857285])
 
-species = Dict("Scas"=>"S. castellii", "Smik"=>"S. mikatae", 
-               "Spar"=>"S. paradoxus", "Skud"=>"S. kudriavzevii", 
-               "Sbay"=>"S. bayanus", "Sklu"=>"S. kluyveri", 
-               "Scer"=>"S. cerivisiae", "Calb"=>"C. albicans")
+
+species = Dict("Scas"=>"S. castellii", 
+               "Smik"=>"S. mikatae", 
+               "Spar"=>"S. paradoxus", 
+               "Skud"=>"S. kudriavzevii", 
+               "Sbay"=>"S. bayanus", 
+               "Sklu"=>"S. kluyveri", 
+               "Scer"=>"S. cerivisiae", 
+               "Calb"=>"C. albicans")
 spmap = Dict(v=>species[k] for (k,v) in tmap.m2)
 
-ps = [plot(relabel(maptree(models[i]), spmap), 
-           transform=true, pad=1., fs=8, scalebar=10) for i=[1,2,4,3]]
+order = [1,2,4,3]
+ps = [plot(relabel(maptree(models[i]), spmap), transform=true, pad=1., fs=8, scalebar=10) for i=order]
 p0 = plot(ps..., layout=(1,4), size=(600,200))
 
-p1 = plot(legend=:right, xlim=(106,Inf), fg_legend=:transparent,
-          ylabel=L"\hat{Z}", xlabel="iteration")
-for i=1:4
-    plot!(p1, getindex.(traces[i], 2), label=labels[i], lw=1.5)
-end
-p2 = plot(legend=:right, fg_legend=:transparent, ylabel=L"C_i", xlabel="site")
-for i=1:4
+p1 = plot(legend=:bottomright, xlim=(106,Inf), fg_legend=:transparent, ylabel=L"\hat{Z}", xlabel="iteration")
+p2 = plot(legend=:bottomright, fg_legend=:transparent, ylabel=L"C_i", xlabel="site")
+for i=order
+    plot!(p1, traces[i], label=labels[i], lw=1.5)
     plot!(p2, sort(algs[i].siteC), lw=1.5, label=labels[i])
 end
 plot(p1, p2)
-
-plot(p0, p1, p2, size=(600, 600/√2))
-
-ps = map([1,3]) do i
-    alg = algs[i]
-    bs = SmoothTree.getbranchapprox(alg.model, randsplits(alg.model.S))
-    bs = sort(filter(x->!SmoothTree.isleafclade(x[2]), bs))
-    p1 = map(bs) do (γ, δ, d)
-        plot(LogNormal(μ, √V), fill=true, color=:lightgray, fillalpha=0.3)
-        plot!(LogNormal(d.μ, d.σ), fill=true, fillalpha=0.3, color=:black, xlim=(0,100))
-    end |> x->plot(x..., size=(650,350))
-    title!(p1[1], labels[i])
-end
-pl2 = plot(ps..., layout=(2,1), size=(600,600/√2))
-
-map(bs) do (γ, δ, d)
-    plot(Normal(μ, √V), fill=true, color=:lightgray, fillalpha=0.3)
-    plot!(Normal(d.μ, d.σ), fill=true, fillalpha=0.3, color=:black, xlim=(-4,4))
-end |> x->plot(x..., size=(650,350))
 
 alg = algs[1]
 pps = SmoothTree.postpredsim(alg.model, data1, 1000)
@@ -121,7 +113,7 @@ plot(pl3, size=(300,200), ylim=(0,1))
 
 #plot(pl1, pl3, layout=grid(1,2, widths=[0.7,0.3]), size=(700,220), bottom_margin=3mm)
 lay = @layout [grid(1,4, widths=[0.2,0.8/3,0.8/3,0.8/3]) ; grid(1,3)]
-p = plot(ps..., p1, p2, pl3, size=(700,400), layout=lay,
+p = plot(ps..., p1, p2, pl3, size=(720,450), layout=lay,
          bottom_margin=3mm, guidefont=9)
 for (i,c) in enumerate('A':'G')
     title!(p[i], "($c)") 
@@ -159,3 +151,21 @@ for (i,x) in enumerate(sort(comp, rev=true))
     scatter!(pl3, [(i, x[3])], color=:lightgray)
 end
 plot(pl3, size=(300,200), ylim=(0,1))
+
+ps = map([1,3]) do i
+    alg = algs[i]
+    bs = SmoothTree.getbranchapprox(alg.model, randsplits(alg.model.S))
+    bs = sort(filter(x->!SmoothTree.isleafclade(x[2]), bs))
+    p1 = map(bs) do (γ, δ, d)
+        plot(LogNormal(μ, √V), fill=true, color=:lightgray, fillalpha=0.3)
+        plot!(LogNormal(d.μ, d.σ), fill=true, fillalpha=0.3, color=:black, xlim=(0,100))
+    end |> x->plot(x..., size=(650,350))
+    title!(p1[1], labels[i])
+end
+pl2 = plot(ps..., layout=(2,1), size=(600,600/√2))
+
+map(bs) do (γ, δ, d)
+    plot(Normal(μ, √V), fill=true, color=:lightgray, fillalpha=0.3)
+    plot!(Normal(d.μ, d.σ), fill=true, fillalpha=0.3, color=:black, xlim=(-4,4))
+end |> x->plot(x..., size=(650,350))
+

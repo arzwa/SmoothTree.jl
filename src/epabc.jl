@@ -73,6 +73,9 @@ end
 #end
 
 # XXX alg.model should be the cavity when calling this function!
+#     that is quite bug-prone... better separate the marginal likelihood update
+#     from the model update... so that we don't need to compute the cavity
+#     partition function here...
 function update!(alg, full, i, lZ)
     @unpack λ, prunetol = alg
     @assert !(alg.model === full)
@@ -103,6 +106,7 @@ end
     target::Float64 = 100. # target ESS
     miness::Float64 = 2.  # minimum ESS for succesful update
     α::Float64 = 1e-3  # Dirichlet-MBM prior in tilted approximation
+    c::Float64 = 0.0   # rejection control quantile
 end
 
 # in the general case we cannot recycle gene trees... so don't store them
@@ -152,19 +156,19 @@ function ep_serial!(alg::EPABC{<:ImportanceSampler}; rnd=true, traceit=10000)
     rnge = rnd ? shuffle(1:length(alg.data)) : 1:length(alg.data)
     iter = ProgressBar(rnge)
     ev = n = -Inf
+    accept = 0
     regen = true
-    mtrace = [alg.model]
-    Ztrace = [(ev, n)]
+    mtrace = typeof(alg.model)[]
+    Ztrace = Tuple{Float64,Float64}[]
     for (j, i) in enumerate(iter)
-        desc = string(@sprintf("%4d %8.1f %9.3f %2d", i, n, ev, regen))
+        desc = string(@sprintf("%4d %8.1f %9.3f %6d %2d", i, n, ev, accept, regen))
         set_description(iter, desc)
-        full, n, Z, regen = ep_iteration!(alg, i, regen)
-        update!(alg, full, i, Z) 
+        full, n, Z, regen, accept, fail = ep_iteration!(alg, i, regen)
+        !fail && update!(alg, full, i, Z) 
         ev = evidence(alg)
         j % traceit == 0 && push!(mtrace, deepcopy(alg.model))
         push!(Ztrace, (ev, n))
     end 
-    #prune!(alg)
     return mtrace, Ztrace
 end
 
@@ -175,7 +179,7 @@ Do a single EP site update with recycling of simulations.
 """
 function ep_iteration!(alg::EPABC{<:ImportanceSampler}, i, regen=true)
     @unpack siteupdate, data = alg
-    @unpack sims, miness, N, α, target = siteupdate
+    @unpack sims, miness, N, α, target, c = siteupdate
     X = data[i]
     #cavity = getcavity(alg, i)
     getcavity!(alg, i)
@@ -187,20 +191,31 @@ function ep_iteration!(alg::EPABC{<:ImportanceSampler}, i, regen=true)
     end
     # note that in the general case we cannot recycle gene trees
     data_likelihood!(w, X, sims)
-    W, n, Z = process_weights(w)
+    W, n, Z, accept = process_weights(w, c)
     if n < miness || !isfinite(Z) 
-        full = uncavity(alg, i)
+        full = uncavity!(alg, i)
+        fail = true
     else 
-        branches = alltrees(sims)
+        branches = alltrees(sims)[accept]
         full = matchmoments(branches, W, alg.model, α)
+        fail = false
     end
     # Note that `full` must be an independent object from the current model. At
     # least, this is assumed in `update!`.
     regen = n < target || !isfinite(Z) || !isfinite(n)
-    return full, n, Z, regen
+    return full, n, Z, regen, sum(accept), fail
 end
 
 alltrees(xs::Vector{Particle{T}}) where T = map(x->x.S, xs)
+
+function logweights(particles, model)
+    w = zeros(length(particles))
+    Threads.@threads for i=1:length(particles)
+        p = particles[i]
+        w[i] = logpdf(model, p.S) - p.w
+    end
+    return w
+end
 
 function data_likelihood!(w, data, sims)
     Threads.@threads for j=1:length(w)
@@ -214,6 +229,20 @@ function process_weights(w)
     n = ess(W)  # ESS estimator (Kong)
     Z = logsumexp(w) - log(length(w))  # marginal likelihood estimator
     return W, n, Z
+end
+
+_accfun(x) = x == 0. ? true : log(rand()) < x
+function process_weights(w, c)  # with rejection control
+    Z  = logsumexp(w) - log(length(w))  # marginal likelihood estimator
+    wc = quantile(w, c)
+    r  = min.(w .- wc, Ref(0.))
+    #accept = log.(rand(length(w))) .< r  # generates too many rns...
+    accept = _accfun.(r)
+    sum(accept) <= 1 && return w, 0., -Inf, accept
+    w .-= r  # modified weight
+    W = lognormalize(w[accept])  # normalized importance weights
+    n = ess(W)  # ESS estimator (Kong)
+    return W, n, Z, accept
 end
 
 function simulate!(particles, model::MSCModel)
@@ -243,16 +272,6 @@ end
 #    S = randbranches(m, model.q)
 #    p = Particle(S, logpdf(model, S))
 #end
-
-function logweights(particles, model)
-    w = zeros(length(particles))
-    Threads.@threads for i=1:length(particles)
-        p = particles[i]
-        w[i] = logpdf(model, p.S) - p.w
-    end
-    return w
-end
-
 
 # For a fixed topology, the following should do. We simply use the BranchModel
 # instead of the MSCModel, and let randbranches! only draw 
@@ -285,3 +304,11 @@ function randbranches!(branches, q::BranchModel)
     end
 end
 
+@with_kw mutable struct SIS{P} <: SiteUpdateAlgorithm
+    N::Int64  # number of particles
+    sims::Vector{P}  # particles
+    target::Float64 = 100. # target ESS
+    miness::Float64 = 2.  # minimum ESS for succesful update
+    α::Float64 = 1e-3  # Dirichlet-MBM prior in tilted approximation
+    c::Float64 = -Inf  # rejection control using quantile
+end

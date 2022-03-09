@@ -40,9 +40,9 @@ Base.getindex(m::AbstractMBM, γ, δ) = m[γ][δ]
 
 # 'empty' MBM (uniform on splits, this does *not* correspond to the
 # zero MBM...)
-const SplitDict{T} = Dict{T,SparseSplits{T,Float64}}
-NatMBM(root::T, β) where T<:Integer = NatMBM(β, SplitDict{T}(), root)
-MomMBM(root::T, β) where T<:Integer = MomMBM(β, SplitDict{T}(), root)
+const SplitDict{T,V} = Dict{T,SparseSplits{T,V}}
+NatMBM(root::T, β::BetaSplitTree{V}) where {T<:Integer,V<:Real} = NatMBM(β, SplitDict{T,V}(), root)
+MomMBM(root::T, β::BetaSplitTree{V}) where {T<:Integer,V<:Real} = MomMBM(β, SplitDict{T,V}(), root)
 
 # natural parameter -> moment parameter
 # XXX note: this ignores the beta split prior distribution
@@ -225,9 +225,8 @@ from the set of explicitly represented splits).
 function prune!(x::M, atol) where {T,V,M<:AbstractMBM{T,V}}
     clades = Set(x.root)
     empty = Set{T}()
-    for (γ, s) in x.smap
-        y = prune(s, atol)
-        x.smap[γ] = y
+    for γ in keys(x.smap)
+        y = prune!(x.smap[γ], atol)
         # all splits with non-negligible probabilities are to be kept
         # note that we also need to keep the complements, which are
         # not in the split distribution of γ but may have their own
@@ -285,4 +284,6 @@ function reftree(x::T) where T
     walk(x)
     return splits
 end
+
+
 

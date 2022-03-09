@@ -89,7 +89,7 @@ using StatsBase, Distributions
     end
 
     @testset "NatBMP algebra" begin 
-        using SmoothTree: nat2mom, mom2nat
+        using SmoothTree: nat2mom, mom2nat, add!, sub!, mul!
         S = nw"((B:Inf,C:Inf):0.5,A:Inf);"
         m = clademap(S)
         M = MSC(S, m)
@@ -107,9 +107,13 @@ using StatsBase, Distributions
         z = SmoothTree.SparseSplits(γ, Dict{UInt16,Int}(), bsd, 1.)
         @test (y + z).η0 ≈ y.η0
         @test (y - y).η0 ≈ z.η0
+        @test add!(y, z).η0 ≈ y.η0 
+        @test sub!(y, z).η0 ≈ y.η0 
+        @test mul!(y, 1.).η0 ≈ y.η0 
     end
 
     @testset "MSCModel" begin
+        using SmoothTree: add!, sub!, mul!
         S = nw"((B:Inf,C:Inf):0.5,A:Inf);"
         m = clademap(S, UInt16)
         M = MSC(S, m)
@@ -119,6 +123,15 @@ using StatsBase, Distributions
         q = BranchModel(UInt16(sum(keys(m))), [1., -1.])
         M1 = MSCModel(X, q)
         M2 = M1 + M1*0.3
+        M3 = mul!(deepcopy(M1), 1.3)
+        M4 = add!(M1, mul!(deepcopy(M1), 0.3))        
+        γ = 0x0007
+        η = [M.S[γ].η0 for M in [M2, M3, M4]]
+        s = [last.(sort(collect(M.S[γ].splits))) for M in [M2, M3, M4]]
+        @test all(η .≈ Ref(η[1]))
+        @test all(s .≈ Ref(s[1]))
+        bs = [randbranches(M3) for i=1:10]
+        M5 = SmoothTree.matchmoments(bs, ones(length(bs)), M3, 1e-3)
     end
 
     @testset "Proper normalization?" begin

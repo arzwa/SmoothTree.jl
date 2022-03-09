@@ -68,7 +68,7 @@ end
 S = readnw("((B:Inf,C:Inf):$θ,A:Inf);")
 m = SmoothTree.clademap(S)
 M = SmoothTree.MSC(S, m)
-N = 100
+N = 20
 Y = randtree(M, m, N)
 X = countmap(Y)
 G = triples(X, m)
@@ -90,7 +90,18 @@ Sprior = NatMBM(root, bsd)
 q      = BranchModel(root, θprior )
 data   = SmoothTree.Locus.(Y, Ref(m))
 model  = MSCModel(Sprior, q)
-alg    = SmoothTree.EPABCIS(data, model, 10000, target=10000, miness=10.)
+
+tree   = SmoothTree.getbranches(S, m)
+alg    = SmoothTree.EPABCIS(data, tree, q, 100000, target=100, miness=10.)
+trace  = [trace; ep!(alg, 30)];
+
+xs = trace[2]
+plot(last.(xs), color=:lightgray, right_margin=12mm)
+p = twinx()
+plot!(p, first.(xs),color=:black)
+hline!(p, [ev])
+
+alg    = SmoothTree.EPABCIS(data, model, 100000, target=100000, miness=10., c=0.)
 trace  = ep!(alg, 10);
 
 relabel.(randtree(alg.model.S, 10000), Ref(m)) |> ranking

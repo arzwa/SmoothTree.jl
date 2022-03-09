@@ -223,3 +223,14 @@ function prune(x::SparseSplits{T,V}, atol) where {T,V}
 end
 
 # we have no in-place method
+function prune!(x::SparseSplits{T,V}, atol) where {T,V}
+    for (δ, v) in x.splits
+        s = splitsize(x.γ, δ)
+        if isapprox(v, x.η0[s], atol=atol)
+            delete!(x.splits, δ)
+            x.k[s] += 1
+        end
+    end 
+    return x
+end
+

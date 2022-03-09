@@ -21,7 +21,11 @@ A vector representation of a tree topology (cladogram)
 """
 const Splits{T} = Vector{Tuple{T,T}}
 
-function getsplits(n::DefaultNode{T}, m::AbstractDict) where T
+function getsplits(d::AbstractDict, m::AbstractDict)
+    Dict(getsplits(k, m)=>v for (k,v) in d)
+end
+
+function getsplits(n::DefaultNode, m::AbstractDict{T,V}) where {T,V}
     splits = Splits{T}()
     _getsplits(splits, n, m)
     return splits
@@ -42,7 +46,7 @@ A vector representation of a phylogenetic tree (with `Float64` branch lengths).
 """
 const Branches{T} = Vector{Tuple{T,T,Float64}}
 
-function getbranches(n::DefaultNode{T}, m::AbstractDict) where {T}
+function getbranches(n::DefaultNode, m::AbstractDict{T}) where {T}
     branches = Branches{T}()
     _getbranches(branches, n, m)
     return reverse(branches)  # return in preorder
