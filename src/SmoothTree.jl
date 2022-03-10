@@ -13,7 +13,7 @@ import Distributions: logpdf
 include("bimap.jl")
 include("utils.jl")
 include("betasplit.jl")
-include("_splits.jl")
+include("ccd.jl")
 #include("msc.jl")
 #include("sparsesplits.jl")
 #include("mbm.jl")

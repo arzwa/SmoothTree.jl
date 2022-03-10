@@ -1,8 +1,13 @@
-# we need both the probability at the split size level for random
-# sampling (in `randsplit` for unrepresented clades) and the
-# probability at the per split level for computing posterior mean MBM
-# (in SparseSplits). For most analyses, this need only be computed
-# once...
+
+abstract type SplittingModel end
+
+# For empirical CCDs
+struct NoModel <: SplittingModel end
+
+# we need both the probability at the split size level for random sampling (in
+# `randsplit` for unrepresented clades) and the probability at the per split
+# level for computing posterior mean MBM (in SparseSplits). For most analyses,
+# this need only be computed once...
 
 """
     BetaSplitTree(β, n)
@@ -25,7 +30,7 @@ cladograms.
 - Jones, Graham R. "Tree models for macroevolution and phylogenetic
   analysis." Systematic biology 60.6 (2011): 735-746.
 """
-struct BetaSplitTree{T}
+struct BetaSplitTree{T} <: SplittingModel
     β::T
     p::Vector{Vector{T}}
     q::Vector{Vector{T}}

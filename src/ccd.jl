@@ -1,42 +1,20 @@
-# Arthur Zwaenepoel 2021
+# March 2022 refactor. I got more clear about the logical structure of the
+# subject, with better terminology, so I wanted to reimplement the code base in
+# accordance with that structure. The main change is that most of the details
+# are now implemented at the level of the split distributions, since the
+# overall structure of a CCD is the same everywhere.
 
-# Note: clades are simply represented by integers, whose binary expansion is a
-# bitstring recording presence/absence of leaf clades.  In other words the
+# Clades and splits
+# =================
+# Here we define some functions for dealing with clades and splits.
+
+# Note that clades are simply represented by integers, whose binary expansion
+# is a bitstring recording presence/absence of leaf clades.  In other words the
 # clade with id 13 is clade 1101, representing the clade containing leaf 4,
-# leaf 3 and leaf 1. This restricts us here to trees with at most 62 leaves.
-# although it would be possible to use larger bits types, or some kind of
-# bitstring type.
-
-abstract type AbstractCCD{T} end
-
-"""
-    CCD(trees::Vector; [lmap=taxon_map])
-    CCD(trees::AbstractDict; [lmap=taxon_map])
-
-A conditional clade distribution (CCD) object. 
-
-Input data can be either a vector of trees or a countmap of trees (see
-`StatsBase.countmap`).
-
-# Examples
-```jldoctest
-julia> ccd = CCD([nw"((A,B),C);", nw"((B,C),A);", nw"((A,B),C);"])
-CCD{UInt16}(n=3, Γ=7)
-```
-"""
-struct CCD{T,V} <: AbstractCCD{T}
-    cmap::Dict{T,V}          # clade counts
-    smap::Dict{T,Dict{T,V}}  # split counts
-    root::T
-end
-
-# some Base methods
-Base.haskey(x::CCD, γ) = haskey(x.cmap, γ)
-Base.haskey(x::CCD, γ, δ) = haskey(x.smap, γ) && haskey(x.smap[γ], δ)
-Base.getindex(x::CCD, γ) = haskey(x, γ) ? x.cmap[γ] : 0
-Base.getindex(x::CCD, γ, δ) = haskey(x, γ, δ) ? x.smap[γ][δ] : 0
-Base.show(io::IO, X::CCD) = write(io, "CCD(Γ=$(X.root))")
-showclades(X::CCD) = sort([(k, bitstring(k), v) for (k,v) in X.cmap])
+# leaf 3 and leaf 1. 
+# This restricts us here (currently) to trees with at most 62 leaves, although
+# it would be possible to use larger bits types, or some kind of bitstring
+# type.
 
 # check if some bitclade represents a leaf
 isleafclade(clade) = count_ones(clade) == 1
@@ -48,91 +26,322 @@ ischerry(clade) = count_ones(clade) == 2
 cladesize(clade) = count_ones(clade)
 
 # get the root clade for n leaves
-rootclade(n, T=UInt64) = T(2^n - 1) 
+rootclade(n, ::Type{T}=UInt64) where T = T(2^n - 1) 
+rootclade(m::BiMap{T}) where T = rootclade(length(m), T)
 
-# conditional clade probability
-ccp(ccd::CCD, γ, δ) = ccd[γ,δ] / ccd[γ]
-logccp(ccd, γ, δ) = log(ccd[γ,δ]) - log(ccd[γ])
+# the number of possible splits of a set of size n
+nsplits(n) = 2^(n-1) - 1
 
+"""
+    maxsplit(γ)
 
-# Constructors
-# ------------
-# from a countmap
-CCD(trees::AbstractDict, lmap, ::Type{T}; rooted=true) where T = 
-    CCD(collect(trees), lmap, T, rooted=rooted)
+The supremum in the order of splits of `γ`, defined to be the clade `(γ - c)`
+where `c` is the leaf in `γ` with largest index.
+"""
+maxsplit(γ::T) where T = T(γ - 2^(ndigits(γ, base=2) - 1))
 
-# For a single tree
-CCD(tree::Node, args...; kwargs...) = CCD([tree], args...; kwargs...)
+function splitcherry(γ)
+    c1 = maxsplit(γ)
+    return c1, γ-c1
+end
 
-# from a vector of (pairs of) trees
-function CCD(trees, lmap, ::Type{T}=Float64; rooted=true) where T
-    ccd = initccd(lmap, T)
-    for tree in trees
-        rooted ? addtree!(ccd, lmap, tree) : addunrooted!(ccd, lmap, tree)
+"""
+    Splits{T}
+
+A collection of splits, i.e. tuples `(γ, δ)`, so that `δ ⊂ γ` and `δ < γ - δ`. 
+"""
+const Splits{T} = Vector{Tuple{T,T}}
+
+# decompose a tree in a set of clades
+function getclades(tree)
+    clades = Vector{String}[]
+    function walk(n)
+        clade = isleaf(n) ? [name(n)] : [walk(n[1]) ; walk(n[2])]
+        sort!(clade)
+        push!(clades, clade)
+        return clade
     end
-    return ccd
+    walk(tree)
+    sort!(clades)
+    return clades
 end
 
-# initialize a ccd
-function initccd(lmap::BiMap{T,V}, ::Type{W}) where {T,V,W}
-    cmap = Dict{T,W}(γ=>zero(W) for (γ,_) in lmap)
-    smap = Dict{T,Dict{T,W}}()
-    root = T(sum(keys(lmap)))
-    cmap[root] = zero(W)  
-    smap[root] = Dict{T,W}()
-    ccd = CCD(cmap, smap, root)
+# test equality of cladograms
+Base.hash(tree::Node) = hash(getclades(tree))
+Base.isequal(t1::Node, t2::Node) = hash(t1) == hash(t2)
+
+
+# Split distributions
+# ===================
+# The split distributions are the main level of importance for the CCD, i.e.
+# they define the probability distribution over trees, whereas the CCD-level
+# just accounts for the Markovian splitting process that generates actual
+# trees.
+
+# We have two main kinds of split distributions:
+# - empirical split distributions
+# - posterior split distributions
+# The former are a special case of the latter, but do not admit the natural
+# parameterization which we use in e.g. EP. We will make all split
+# distributions subtypes of an abstract type.
+
+abstract type AbstractSplits{T,V} end
+
+Base.haskey(m::AbstractSplits, δ) = haskey(m.splits, δ)
+
+"""
+    randsplit(x<:AbstractSplits)
+
+Simulate a random split according to split distribution `x`.
+"""
+randsplit(x::AbstractSplits) = randsplit(Random.default_rng(), x)
+
+
+# Empirical split distribution
+# ----------------------------
+# Note that in the case of an empirical CCD, we would like to store the clade
+# and split counts. Or don't we? Alternatively we may deal with that only in
+# the constructor? Or we could only store the clade counts, not split counts?
+
+"""
+    EmpiricalSplits{T,V}
+
+Empirical split distribution. This is not much more than a dictionary.
+"""
+struct EmpiricalSplits{T,V} <: AbstractSplits{T,V}
+    parent::T
+    splits::Dict{T,V}  # split distribution
 end
 
-# add a tree/number of identical trees to the CCD
-addtree!(ccd::CCD, lmap, tpair) = addtree!(ccd, lmap, tpair[1], tpair[2])  
-function addtree!(ccd::CCD, lmap, tree::Node, w=1)
-    @unpack cmap, smap = ccd
+Base.getindex(x::EmpiricalSplits, δ) = haskey(x, δ) ? x.splits[δ] : 0.
+
+logpdf(x::EmpiricalSplits, δ) = log(x[δ])
+
+function randsplit(rng::AbstractRNG, x::EmpiricalSplits)
+    δs = collect(x.splits)
+    i = sample(rng, 1:length(δs), Weights(last.(δs)))
+    return first(δs[i])
+end
+
+
+# Beta-splitting posterior split distribution
+# -------------------------------------------
+# For the Beta-splitting posterior CCD, should we have two different types, or
+# dispatch on some type parameter?
+
+"""
+    MBMSplits
+
+MBMSplits types implement posterior split distributions assuming a Markov
+branching model prior for the split distribution (i.e. a prior on subclade
+sizes).
+"""
+abstract type MBMSplits{T,V} <: AbstractSplits{T,V} end
+
+struct NatBetaSplits{T,V} <: MBMSplits{T,V}
+    parent::T
+    refsplit::T  # reference split for 'wrapping' the categorical
+    splits::Dict{T,V}  # represented splits
+    n::Vector{Int}  # total number of splits of each size  
+    k::Vector{Int}  # number of unrepresented splits of each size
+    η0::Vector{V}  # parameter for unrepresented splits
+end
+
+struct MomBetaSplits{T,V} <: MBMSplits{T,V}
+    parent::T
+    refsplit::T  # reference split for 'wrapping' the categorical
+    splits::Dict{T,V}  # represented splits
+    n::Vector{Int}  # total number of splits of each size  
+    k::Vector{Int}  # number of unrepresented splits of each size
+    η0::Vector{V}  # parameter for unrepresented splits
+end
+
+Base.getindex(x::MBMSplits, δ) = haskey(x, δ) ? x.splits[δ] : x.η0[splitsize(x.parent, δ)]
+
+"""
+    NatBetaSplits(clade, counts, bsd, α)
+
+Get a natural parameter BetaSplits object from split counts `d`, assuming the
+Beta-splitting Dirichlet prior `bsd` with pseudo-count α and shape parameter
+`β`. 
+"""
+function NatBetaSplits(γ::T, d, bsd::BetaSplitTree{V}, α) where {T,V}
+    ρ  = maxsplit(γ)
+    s  = cladesize(γ) 
+    ns = nsplits.(s, 1:s÷2) 
+    as = α .* bsd.q[s-2]
+    aρ = as[splitsize(γ, ρ)]
+    pρ = haskey(d, ρ) ? log(aρ + d[ρ]) : log(aρ)  # unnormalized pr of split ρ
+    η0 = log.(as) .- pρ 
+    dd = Dict{T,V}()
+    kc = zeros(Int, s÷2)  # counter
+    for (δ, count) in d
+        k = splitsize(γ, δ)
+        dd[δ] = log(as[k] + count) - pρ
+        kc[k] += 1
+    end
+    k = ns .- kc
+    NatBetaSplits(γ, ρ, dd, ns, k, η0)
+end
+
+function tomoment(x::NatBetaSplits)
+    η0 = exp.(x.η0)
+    d = Dict(k=>exp(v) for (k,v) in x.splits)
+    S = sum(values(d))
+    Z = S + sum(x.k .* η0)
+    for (k, v) in d
+        d[k] /= Z
+    end
+    MomBetaSplits(x.parent, x.refsplit, d, x.n, x.k, η0/Z)
+end
+
+function tonatural(x::MomBetaSplits)
+    ρ = x.refsplit
+    pρ = log(x[ρ])
+    η0 = log.(x.η0) .- pρ
+    d = Dict(k=>log(p) - pρ for (k,p) in x.splits)
+    NatBetaSplits(x.parent, ρ, d, x.n, x.k, η0)
+end
+
+
+# Probabilities for the BetaSplits models
+# ---------------------------------------
+logpdf(x::MomBetaSplits, δ) = log(x[δ])
+
+function logpdf(x::NatBetaSplits, δ)
+    y = exp.(collect(values(x.splits)))
+    Z = sum(y) + sum(x.k .* exp.(x.η0))
+    return x[δ] - log(Z)
+end
+
+
+# Sampling for the BetaSplits models
+# ----------------------------------
+# I guess it is good practice to pass the random number generator explicitly,
+# although I have never actually used the feature of passing around the RNG in
+# simulation code...
+
+function randsplit(rng::AbstractRNG, n::MomBetaSplits)
+    splitps = collect(x.splits)
+    pr = [w - x.η0[splitsize(x.parent, δ)] for (δ, w) in splitps]
+    if rand() < sum(pr)
+        i = sample(rng, Weights(pr))
+        return first(splitps[i])
+    else 
+        k = sample(rng, Weights(x.η0 .* x.n))
+        return randsplitofsize(rng, x.parent, k)
+    end
+end
+
+function randsplit(rng::AbstractRNG, x::NatBetaSplits)
+    η0 = exp.(x.η0)
+    vs = exp.(values(x.splits))
+    δs = collect(keys(x.splits))
+    pr = x.k .* η0
+    Z  = sum(vs) + sum(pr)
+    vs ./= Z
+    η0 ./= Z
+    r = rand(rng) 
+    i = 1
+    # sort δs, vs by vs?
+    while i <= length(δs)
+        pδ = vs[i]
+        r -= (pδ - η0[splitsize(x.parent, δs[i])])
+        r < 0. && return δs[i]
+        i += 1
+    end
+    k = sample(rng, Weights(pr))
+    return randsplitofsize(rng, x.parent, k)
+end
+
+
+# Split counts
+# ============
+# The split counts constitute a sufficient statistic for any CCD. It is
+# therefore useful both for preprocessing tree data and for computing
+# likelihoods etc. to have a struct which collects this sufficient statistic
+# and computes it efficiently for various kinds of input data.
+# Note that we call it counts, but in the case the input is weighted in any
+# way, these need not be integers.
+const SplitDict{T,V} = Dict{T,Dict{T,V}}
+
+"""
+    SplitCounts(trees, clademap, [weights; rooted=true])
+
+(Weighted) split counts for a collection of trees. This is a sufficient
+statistic for CCD distributions over cladograms.
+"""
+struct SplitCounts{T,V}
+    smap::SplitDict{T,V}
+    root::T
+end
+
+SplitCounts(root::T) where {T<:Integer} = SplitCounts(SplitDict{T,Int64}(), root)
+
+# some inelegant code repetition here...
+SplitCounts(d::AbstractDict, m::AbstractDict; rooted=true) = 
+    SplitCounts(collect(keys(d)), m, collect(values(d)))
+
+SplitCountsUnrooted(d::AbstractDict, m::AbstractDict; rooted=true) = 
+    SplitCountsUnrooted(collect(keys(d)), m, collect(values(d)))
+
+function SplitCounts(ts, m::AbstractDict{T}, ws::AbstractVector{V}) where {T,V}
+    d = SplitDict{T,V}()
+    for (tree, w) in zip(ts, ws)
+        add_splits!(d, m, tree, w)
+    end
+    return SplitCounts(d, rootclade(m))
+end
+
+function SplitCounts(trees, m::AbstractDict{T}) where T
+    d = SplitDict{T,Int64}()
+    for tree in trees
+        add_splits!(d, m, tree, 1)
+    end
+    return SplitCounts(d, rootclade(m))
+end
+
+function SplitCountsUnrooted(ts, m::AbstractDict{T}, ws::AbstractVector{V}) where {T,V}
+    d = SplitDict{T,Float64}()
+    for (tree, w) in zip(ts, ws)
+        add_splits_unrooted!(d, m, tree, w)
+    end
+    return SplitCounts(d, rootclade(m))
+end
+
+function SplitCountsUnrooted(ts, m::AbstractDict{T}) where T
+    d = SplitDict{T,Float64}()
+    for tree in ts
+        add_splits_unrooted!(d, m, tree, 1.)
+    end
+    return SplitCounts(d, rootclade(m))
+end
+
+function add_splits!(d, m, tree::Node, w=1)
     @assert NewickTree.isbifurcating(tree)
     function walk(n)
         if isleaf(n)
-            leaf = lmap[name(n)] 
-            cmap[leaf] += w
+            leaf = m[name(n)] 
             return leaf
         else
             left = walk(n[1])
             rght = walk(n[2])
             clade = left + rght
             x = min(left, rght)
-            _update!(cmap, smap, clade, x, w)
+            !ischerry(clade) && update!(d, clade, x, w)
             return clade
         end
     end
     walk(tree)
 end
 
-# NOTE, we assume the unrooted tree is represented as a rooted one!
-addunrooted!(ccd::CCD, lmap, tpair) = addunrooted!(ccd, lmap, tpair[1], tpair[2])  
-
-# naive implementation
-#function _addunrooted!(ccd::CCD, lmap, tree::Node, w=1)
-#    @assert NewickTree.isbifurcating(tree)
-#    o = prewalk(tree)
-#    m = length(o) - 2
-#    for n in o
-#        parent(n) == tree && continue
-#        t = set_outgroup(n)
-#        addtree!(ccd, lmap, t, w/m)
-#    end
-#end
-
-# Add an unrooted tree to the CCD. Note that with this, we could in principle
-# combine rooted and unrooted trees in the CCD, although in practice one will
-# rarely have occasion for that. 
-# See the sketch in `docs/img/unrooted-ccd.pdf` for the logic.
-function addunrooted!(ccd::CCD, lmap, tree::Node, w=1)
+function add_splits_unrooted!(d, lmap, tree::Node, w=1)
     @assert NewickTree.isbifurcating(tree)
-    @unpack cmap, smap = ccd
-    o = ccd.root
+    o = rootclade(lmap)
     m = length(prewalk(tree)) - 2  # possible rootings
     function walk(n)
         if isleaf(n)
             leaf = lmap[name(n)] 
-            cmap[leaf] += w
             return leaf, 1
         else
             # recurse left and right down the pseudo-rooted tree
@@ -140,6 +349,7 @@ function addunrooted!(ccd::CCD, lmap, tree::Node, w=1)
             s2, b2 = walk(n[2])
             # clade below current node in pseudo-rooted tree
             c1 = s1 + s2
+            return c1, b1 + b2
             # s3 is the complement of that clade, i.e. the clade defined by the
             # bipartition in the unrooted tree induced by the branch leading to
             # n in the pseudo-rooted tree
@@ -158,11 +368,11 @@ function addunrooted!(ccd::CCD, lmap, tree::Node, w=1)
             # (s3,c1|o)) will be dealt with in the recursion
             x2 = min(c2, o-c2)
             x3 = min(c3, o-c3)
-            _update!(cmap, smap, o, x2, w/m)
+            update!(d, o, x2, w/m)
             # if we are dealing with the root node of the pseudo-rooted tree,
             # x2 and x3 are the same, so we return here.
             isroot(n) && return c1, b1 + b2
-            _update!(cmap, smap, o, x3, w/m)
+            update!(d, o, x3, w/m)
             # now for the non-root splits, already mentioned above. The main
             # thing here is to properly compute the weights. For every split,
             # we need to add it to the CCD weighted by the number of unrooted
@@ -179,127 +389,163 @@ function addunrooted!(ccd::CCD, lmap, tree::Node, w=1)
             x1 = min(s1, s2)
             x2 = min(s1, s3)
             x3 = min(s2, s3)
-            _update!(cmap, smap, c1, x1, (m3/m)*w)
-            _update!(cmap, smap, c2, x2, (m2/m)*w)
-            _update!(cmap, smap, c3, x3, (m1/m)*w)
+            update!(d, c1, x1, (m3/m)*w)
+            update!(d, c2, x2, (m2/m)*w)
+            update!(d, c3, x3, (m1/m)*w)
             return c1, b1 + b2
         end
     end
     walk(tree)
 end
 
-# For branches... actually very similar for splits... assumes rooted!
-function CCD(bs::Vector{Branches{T}}, ws::Vector{W}) where {T,W}
-    ccd = initccd(bs[1], W)
-    for (x, w) in zip(bs, ws)
-        addtree!(ccd, x, w)
-    end
-    return ccd
-end
-
-function initccd(b::Branches{T}, ::Type{W}) where {T,W}
-    root = b[1][1]  # XXX should be in preorder!
-    cmap = Dict{T,W}()
-    smap = Dict{T,Dict{T,W}}()
-    ccd = CCD(cmap, smap, root)
-end
-
-function addtree!(ccd::CCD, x::Branches, w)
-    for i=length(x):-2:1
-        γ, δ, _ = x[i]
-        δ = min(δ, γ-δ)
-        _update!(ccd.cmap, ccd.smap, γ, δ)
-        ccd.cmap[γ] += w
-        ccd.smap[γ][δ] += w
-    end
-end
-
-# should we use defaultdict instead?
-function _update!(m1::Dict{T,V}, m2, y, x, w=zero(V)) where {T,V}
-    if !haskey(m1, y) 
-        m1[y] = w
+function update!(d, γ, δ::T, w::V) where {T,V}
+    if !haskey(d, γ) 
+        d[γ] = Dict(δ=>w)
+    elseif !haskey(d[γ], δ)
+        d[γ][δ] = w
     else
-        m1[y] += w
-    end
-    if !haskey(m2, y) 
-        m2[y] = Dict(x=>w)
-    elseif !haskey(m2[y], x)
-        m2[y][x] = w
-    else
-        m2[y][x] += w
+        d[γ][δ] += w
     end
 end
 
 
-# Sampling methods
-# ----------------
-# do n `randsplits` simulations
-randsplits(model, n) = map(_->randsplits(model), 1:n)
+# CCD
+# ===
+# Using the above implementation for split distributions, the CCD becomes no
+# more then collection of these distributions, indexed by the associated clade.
 
-# draw a tree from the ccd, simulates a tree as a set of splits
-randsplits(ccd::CCD{T}) where T = _randwalk(Tuple{T,T}[], ccd.root, ccd)
+# The SplitCounts are a sufficient statistic for the CCD. We should admit
+# computing the likelihood from an individual split set, an individual tree and
+# a SplitCounts object.
 
-function _randwalk(splits, clade, ccd)
-    isleafclade(clade) && return splits
-    csplits = collect(ccd.smap[clade])
-    splt = sample(1:length(csplits), Weights(last.(csplits)))
-    left = first(csplits[splt])
+"""
+    CCD(splitcounts[, model])
+
+Conditional clade distribution
+"""
+struct CCD{T,S,M<:SplittingModel}
+    smap ::Dict{T,S}
+    prior::M
+    root ::T
+end
+
+Base.haskey(x::CCD, γ) = haskey(x.smap, γ)
+Base.getindex(x::CCD, γ) = x.smap[γ] 
+Base.show(io::IO, x::CCD) = write(io, "CCD(Γ=$(x.root))")
+
+# For the empirical CCD we need this function which 'normalizes' a dictionary
+function normalize(x::Dict)
+    Z = sum(values(x))
+    Dict(k=>v/Z for (k,v) in x)
+end
+
+# Construct the empirical CCD
+function CCD(splits::SplitCounts)
+    smap = Dict(γ=>EmpiricalSplits(γ, normalize(x)) for (γ, x) in splits.smap)
+    return CCD(smap, NoModel(), splits.root)
+end
+
+# Construct a beta-splitting CCD
+function CCD(splits::SplitCounts, bsd::BetaSplitTree, α=1.)
+    smap = Dict(γ=>NatBetaSplits(γ, x, bsd, α) for (γ, x) in splits.smap if !ischerry(γ))
+    return CCD(smap, bsd, splits.root)
+end
+
+
+# Sampling random cladograms from a CCD
+# -------------------------------------
+# We do not explicitly store the splits of cherries, since they are invariable.
+
+function randsplits(rng::AbstractRNG, ccd::CCD{T}) where T
+    return _randwalk!(rng, Tuple{T,T}[], ccd.root, ccd)
+end
+
+randsplits(ccd::CCD) = randsplits(Random.default_rng(), ccd)
+randsplits(ccd::CCD, n::Int) = randsplits(Random.default_rng(), ccd, n)
+randsplits(rng, ccd::CCD, n::Int) = map(_->randsplits(rng, ccd), 1:n)
+
+function _randwalk!(rng::AbstractRNG, splits, clade, ccd)
+    (ischerry(clade) || isleafclade(clade)) && return splits
+    left = haskey(ccd, clade) ? 
+        randsplit(rng, ccd[clade]) : 
+        randsplit(rng, ccd.prior, clade)
     rght = clade - left
     push!(splits, (clade, left))
-    splits = _randwalk(splits, left, ccd)
-    splits = _randwalk(splits, rght, ccd)
+    splits = _randwalk!(rng, splits, left, ccd)
+    splits = _randwalk!(rng, splits, rght, ccd)
     return splits
 end
 
-# draw a random tree from the CCD
-function randtree(ccd::CCD, lmap)
-    splits = randsplits(ccd)
+# obtain a tree from a split set
+const DefaultNode{T} = Node{T,NewickData{Float64,String}}
+
+randtree(ccd::CCD, lmap) = randtree(Random.default_rng(), ccd, lmap)
+randtree(ccd::CCD, lmap, n) = randtree(Random.default_rng(), ccd, lmap, n)
+randtree(rng::AbstractRNG, ccd::CCD, lmap, n) = map(_->randtree(rng, ccd, lmap), 1:n)
+
+function randtree(rng::AbstractRNG, ccd::CCD, lmap)
+    splits = randsplits(rng, ccd)
     gettree(splits, lmap)
 end
 
-randtree(model::CCD, m, n) = map(_->randtree(model, m), 1:n)
+function gettree(splits::Splits{T}, names) where T
+    nodes = Dict{T,DefaultNode{T}}()
+    for (γ, δ) in splits
+        p, l, r = map(c->_getnode!(nodes, names, c), [γ, δ, γ-δ])
+        push!(p, l, r)   
+    end
+    return getroot(nodes[splits[end][1]])
+end
+
+function _getnode!(nodes, names, n)
+    isleafclade(n) && return Node(n, n=names[n])
+    haskey(nodes, n) && return nodes[n]
+    nodes[n] = Node(n)
+    if ischerry(n) 
+        c1, c2 = splitcherry(n)
+        l = _getnode!(nodes, names, c1)
+        r = _getnode!(nodes, names, c2)
+        push!(nodes[n], l, r)
+    end
+    return nodes[n]
+end
 
 
-# Compute probabilities
-# ---------------------
-# compute the probability of a set of splits
-function logpdf(ccd::CCD, splits::Vector{T}) where T<:Tuple
+# Computing probabilities for the CCD
+# -----------------------------------
+# We should implement `logpdf` function for multiple data structures. (1) A
+# single collection of splits, (2) a `SplitCounts` object, (3) a single tree.
+# Not sure about (3), perhaps we should enforce going through either (1) or
+# (2).
+
+"""
+    logpdf(ccd::CCD, splits::Splits)
+
+Log probability for a single collection of splits.
+"""
+function logpdf(ccd::CCD, splits::Splits)
     ℓ = 0.
     for (γ, δ) in splits
-        ℓ += logccp(ccd, γ, δ)
+        ℓ += haskey(ccd, γ) ? logpdf(ccd[γ], δ) : logpdf(ccd.prior, γ, δ)
     end
     return isnan(ℓ) ? -Inf : ℓ
 end
-# XXX: Ideally, we'd check in some way whether the leaf set of the ccd
-# and check if splits actually correspond to splits in the ccd, if not
-# return -Inf, but that induces an overhead I guess...
 
-# compute the probability mass of a single tree under the CCD
-function logpdf(ccd::CCD, lmap, tree::Node)
-    ℓ, _ = _lwalk(tree, ccd, lmap, 0.)
-    return isnan(ℓ) ? -Inf : ℓ
-end
-
-function _lwalk(n::Node, ccd, lmap, ℓ)
-    isleaf(n) && return ℓ, lmap[name(n)]
-    ℓ, left = _lwalk(n[1], ccd, lmap, ℓ) 
-    ℓ, rght = _lwalk(n[2], ccd, lmap, ℓ)
-    δ = left < rght ? left : rght
-    γ = left + rght
-    ℓ += logccp(ccd, γ, δ) 
-    return ℓ, γ
-end
-
-# for a vector of trees
-logpdf(ccd::CCD, trees::AbstractVector) = mapreduce(t->logpdf(ccd, t), +, trees)
-
-# for a countmap
-function logpdf(ccd, trees::Dict)
-    l = 0.
-    for (tree, count) in trees
-        l += count*logpdf(ccd, tree)
+function logpdf(ccd::CCD, counts::SplitCounts)
+    ℓ = 0.
+    for (γ, d) in counts.smap
+        if haskey(ccd, γ)
+            x = ccd[γ]
+            for (δ, k) in d
+                ℓ += k*logpdf(x, δ)
+            end
+        else
+            for (δ, k) in d
+                ℓ += k*logpdf(ccd.prior, γ, δ)
+            end
+        end
     end
-    return l
+    return ℓ
 end
 
 

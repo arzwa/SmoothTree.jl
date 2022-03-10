@@ -2,7 +2,29 @@ using Pkg; Pkg.activate(@__DIR__)
 using SmoothTree, Test, NewickTree
 using StatsBase, Distributions
 
-using SmoothTree: clademap, CCD, SplitCounts
+using SmoothTree: clademap, rootclade, CCD, SplitCounts, BetaSplitTree, randtree, randsplits
+
+@testset "SmoothTree tests" begin
+
+    # We test the beta-splitting Bayes CCD using the special case β=-1.5, which
+    # leads to a uniform distribution over tree topologies.
+    @testset "Beta-splitting CCD, PDA model" begin
+        for n=3:5
+            taxa = string.(1:n)
+            smap = clademap(taxa)
+            root = rootclade(smap)
+            bsd = BetaSplitTree(-1.5, length(taxa))
+            ccd = CCD(SplitCounts(root), bsd, 1.)
+            trees = proportionmap(randtree(ccd, smap, 10000))
+            ps = collect(values(trees))
+            u = 1/length(ps)
+            @test sum(abs.(ps .- u)) < 0.1
+            y = randsplits(ccd)
+            @test logpdf(ccd, y) ≈ log(u)
+        end
+    end
+
+end
 
 @testset "SmoothTree tests" begin
 #    treesfile = joinpath(@__DIR__, "OG0006030.trees")

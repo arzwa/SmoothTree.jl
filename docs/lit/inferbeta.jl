@@ -1,4 +1,4 @@
-using Turing
+using Turing, Optim
 using Distributions, SmoothTree, NewickTree, Serialization
 
 data = deserialize("docs/data/mints/mb1000.jls")
@@ -7,42 +7,44 @@ taxa = name.(getleaves(tre1))
 smap = clademap(taxa, UInt32)
 root = UInt32(sum(keys(smap)))
 
-data = map(data) do d
-    Dict(k=>v/sum(values(d)) for (k,v) in d)
+X = map(data) do d
+    SmoothTree.SplitCountsUnrooted(d, smap)
 end
 
-# we can compare using ML gene trees against acknowledging uncertainty
-data1 = Locus.(data, Ref(smap), 1e-6, -1.5)
-data2 = [SmoothTree.getsplits(data[i], data1[i].lmap) for i=1:length(data)]
+bsd = BetaSplitTree(-1.5, length(taxa))
+model = CCD(SplitCounts(root), bsd, 1.)
+logpdf(model, X[1])
 
-function loglik(root, data, β)
-    n = SmoothTree.cladesize(root)
-    mapreduce(i->logpdf(NatMBM(root, BetaSplitTree(β, n)), data[i]), +, 1:length(data))
+@model betainfer(data, root, n) = begin
+    β ~ Uniform(-2., 10.)
+    bsd = BetaSplitTree(β, n)
+    model = CCD(SplitCounts(root), bsd, 1.)
+    for x in data
+        Turing.@addlogprob!(logpdf(model, x))
+    end
 end
 
-# We can easily find posterior distribution for beta using above likelihood.
-# Somehow it sounds reasonable that the posterior mean beta should be the ideal
-# value for smoothing the tree empirical CCD, but how does this make sense
-# formally?
+chain = sample(betainfer(X, root, length(taxa)), NUTS(), 200)
 
-@model betainfer(data, root) = begin
+result = optimize(betainfer(X, root, length(taxa)), MLE())
+
+mles = map(X) do x
+    result = optimize(betainfer([x], root, length(taxa)), MLE())
+    b = result.values[1]
+end
+
+# this does not work...
+@model betainfer2(data, n) = begin
     β ~ Uniform(-2., 2.)
-    Turing.@addlogprob!(loglik(root, data, β))
+    for x in data
+        bsd = BetaSplitTree(β, n)
+        model = CCD(x, bsd, .1)
+        Turing.@addlogprob!(logpdf(model, x))
+    end
 end
 
-chain = sample(betainfer(data2, root), NUTS(), 500)
+chain = sample(betainfer2(X, length(taxa)), NUTS(), 10)
 
-#For the mints data set:
-#Summary Statistics
-#  parameters      mean       std   naive_se      mcse        ess    ⋯
-#      Symbol   Float64   Float64    Float64   Float64    Float64    ⋯
-#
-#           β   -1.3009    0.0145     0.0006    0.0013   110.7126    ⋯
-#                                                     1 column omitted
-#
-#Quantiles
-#  parameters      2.5%     25.0%     50.0%     75.0%     97.5%
-#      Symbol   Float64   Float64   Float64   Float64   Float64
-#
-#           β   -1.3288   -1.3098   -1.3011   -1.2913   -1.2720
-#
+# cross-validation?
+# What is the best way to obtain the best (α,β) so that the CCD generalizes
+# to unsampled trees in the best possible way?
