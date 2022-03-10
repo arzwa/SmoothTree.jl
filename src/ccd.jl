@@ -4,8 +4,10 @@
 # bitstring recording presence/absence of leaf clades.  In other words the
 # clade with id 13 is clade 1101, representing the clade containing leaf 4,
 # leaf 3 and leaf 1. This restricts us here to trees with at most 62 leaves.
+# although it would be possible to use larger bits types, or some kind of
+# bitstring type.
 
-# Note: trees are currently represented as rooted
+abstract type AbstractCCD{T} end
 
 """
     CCD(trees::Vector; [lmap=taxon_map])
@@ -22,7 +24,7 @@ julia> ccd = CCD([nw"((A,B),C);", nw"((B,C),A);", nw"((A,B),C);"])
 CCD{UInt16}(n=3, Γ=7)
 ```
 """
-struct CCD{T,V}
+struct CCD{T,V} <: AbstractCCD{T}
     cmap::Dict{T,V}          # clade counts
     smap::Dict{T,Dict{T,V}}  # split counts
     root::T

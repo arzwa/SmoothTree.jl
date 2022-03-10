@@ -84,12 +84,13 @@ end
 
 Generate a random split of clade `γ` for the Beta splitting model `m`
 """
-function randsplit(m::BetaSplitTree, γ)
+randsplit(m::BetaSplitTree, γ) = randsplit(Random.default_rng(), m, γ)
+function randsplit(rng::AbstractRNG, m::BetaSplitTree, γ)
     s = cladesize(γ)
     s <= 3 && return randsplitofsize(γ, 1)
     p = m.p[s-2]
-    k = sample(1:length(p), Weights(p))
-    randsplitofsize(γ, k)
+    k = sample(rng, 1:length(p), Weights(p))
+    randsplitofsize(rng, γ, k)
 end
 
 # a random split clade γ of size k 
@@ -98,10 +99,11 @@ end
 
 Pick a split uniformly from the set of splits of size `k` in clade `γ`.
 """
-function randsplitofsize(γ::T, k) where T
+randsplitofsize(γ, k) = randsplitofsize(Random.default_rng(), γ, k)
+function randsplitofsize(rng::AbstractRNG, γ::T, k) where T
     g = digits(γ, base=2)  # binary expansion
     n = sum(g)             # number of leaves
-    o = reverse!(sample(1:n, k, replace=false, ordered=true))
+    o = reverse!(sample(rng, 1:n, k, replace=false, ordered=true))
     # `o` records which leaves end up in left/right subclade
     # o = [a,b] means we obtain a split by taking/removing the ath and
     # bth leaf from γ. Note that this does not mean the ath and bth

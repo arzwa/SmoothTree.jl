@@ -39,7 +39,7 @@ function clademap(trees::Vector{<:Node}, T)
     return clademap(leaves, T)
 end
 
-function clademap(l::Vector{String}, T=UInt16)
+function clademap(l::Vector{String}, ::Type{T}=UInt16) where T
     d = Dict(T(2^i)=>l[i+1] for i=0:length(l)-1)
     return BiMap(d)
 end

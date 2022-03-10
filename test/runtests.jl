@@ -2,13 +2,15 @@ using Pkg; Pkg.activate(@__DIR__)
 using SmoothTree, Test, NewickTree
 using StatsBase, Distributions
 
+using SmoothTree: clademap, CCD, SplitCounts
+
 @testset "SmoothTree tests" begin
-    treesfile = joinpath(@__DIR__, "OG0006030.trees")
-    #treesfile = joinpath(@__DIR__, "test/OG0006030.trees")
+#    treesfile = joinpath(@__DIR__, "OG0006030.trees")
+    treesfile = joinpath(@__DIR__, "test/OG0006030.trees")
     trees = readnw.(readlines(treesfile))
     trees = SmoothTree.rootall(trees)
     tmap  = clademap(trees[1])
-    ccd   = CCD(trees, tmap)
+    ccd   = CCD(SplitCounts(trees, tmap))
 
     @testset "Beta-splitting SparseSplits" begin
         γ = UInt8(15)
