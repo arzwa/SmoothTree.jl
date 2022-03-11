@@ -1,8 +1,17 @@
+"""
+    SpliitingModel
 
+A `SplittingModel` implements `randsplit(model, γ)` and `logpdf(model, γ, δ)`
+"""
 abstract type SplittingModel end
 
 # For empirical CCDs
 struct NoModel <: SplittingModel end
+
+# If logpdf is called on the mock model, we want it to default to 1 for
+# cherries, since there is only one possible split. But usually we should
+# prevent calling logpdf in that case.
+logpdf(m::NoModel, γ, δ) = ischerry(γ) ? 1. : 0.
 
 # we need both the probability at the split size level for random sampling (in
 # `randsplit` for unrepresented clades) and the probability at the per split

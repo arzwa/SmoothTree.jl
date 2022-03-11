@@ -41,6 +41,7 @@ where `c` is the leaf in `γ` with largest index.
 maxsplit(γ::T) where T = T(γ - 2^(ndigits(γ, base=2) - 1))
 
 function splitcherry(γ)
+    @assert ischerry(γ)
     c1 = maxsplit(γ)
     return c1, γ-c1
 end
@@ -52,23 +53,12 @@ A collection of splits, i.e. tuples `(γ, δ)`, so that `δ ⊂ γ` and `δ < γ
 """
 const Splits{T} = Vector{Tuple{T,T}}
 
-# decompose a tree in a set of clades
-function getclades(tree)
-    clades = Vector{String}[]
-    function walk(n)
-        clade = isleaf(n) ? [name(n)] : [walk(n[1]) ; walk(n[2])]
-        sort!(clade)
-        push!(clades, clade)
-        return clade
-    end
-    walk(tree)
-    sort!(clades)
-    return clades
-end
+"""
+    Branches{T}
 
-# test equality of cladograms
-Base.hash(tree::Node) = hash(getclades(tree))
-Base.isequal(t1::Node, t2::Node) = hash(t1) == hash(t2)
+A vector representation of a phylogenetic tree (with `Float64` branch lengths).
+"""
+const Branches{T} = Vector{Tuple{T,T,Float64}}
 
 
 # Split distributions
@@ -88,6 +78,11 @@ Base.isequal(t1::Node, t2::Node) = hash(t1) == hash(t2)
 abstract type AbstractSplits{T,V} end
 
 Base.haskey(m::AbstractSplits, δ) = haskey(m.splits, δ)
+Base.iterate(m::AbstractSplits) = iterate(m.splits)
+Base.iterate(m::AbstractSplits, i) = iterate(m.splits, i)
+Base.length(m::AbstractSplits) = length(m.splits)
+Base.setindex!(m::AbstractSplits, v, δ) = m.splits[δ] = v
+Base.keys(m::AbstractSplits) = keys(m.splits)
 
 """
     randsplit(x<:AbstractSplits)
@@ -156,7 +151,8 @@ struct MomBetaSplits{T,V} <: MBMSplits{T,V}
     η0::Vector{V}  # parameter for unrepresented splits
 end
 
-Base.getindex(x::MBMSplits, δ) = haskey(x, δ) ? x.splits[δ] : x.η0[splitsize(x.parent, δ)]
+Base.getindex(x::MBMSplits, δ) = haskey(x, δ) ? 
+    x.splits[δ] : x.η0[splitsize(x.parent, δ)]
 
 """
     NatBetaSplits(clade, counts, bsd, α)
@@ -221,37 +217,35 @@ end
 # although I have never actually used the feature of passing around the RNG in
 # simulation code...
 
-function randsplit(rng::AbstractRNG, n::MomBetaSplits)
-    splitps = collect(x.splits)
-    pr = [w - x.η0[splitsize(x.parent, δ)] for (δ, w) in splitps]
-    if rand() < sum(pr)
-        i = sample(rng, Weights(pr))
-        return first(splitps[i])
-    else 
-        k = sample(rng, Weights(x.η0 .* x.n))
-        return randsplitofsize(rng, x.parent, k)
-    end
+function randsplit(rng::AbstractRNG, x::MomBetaSplits)
+    vs = collect(values(x.splits))
+    δs = collect(keys(x.splits))
+    _randsplit(rng, x.parent, δs, vs, x.η0 .* x.n, x.η0) 
 end
 
 function randsplit(rng::AbstractRNG, x::NatBetaSplits)
     η0 = exp.(x.η0)
+    pr = x.k .* η0
     vs = exp.(values(x.splits))
     δs = collect(keys(x.splits))
-    pr = x.k .* η0
     Z  = sum(vs) + sum(pr)
     vs ./= Z
     η0 ./= Z
-    r = rand(rng) 
+    _randsplit(rng, x.parent, δs, vs, pr, η0)
+end
+
+function _randsplit(rng::AbstractRNG, γ, δs, ps, pr, η0)
     i = 1
-    # sort δs, vs by vs?
+    r = rand(rng) 
+    # sort δs, ps by ps?
     while i <= length(δs)
-        pδ = vs[i]
-        r -= (pδ - η0[splitsize(x.parent, δs[i])])
+        pδ = ps[i]
+        r -= (pδ - η0[splitsize(γ, δs[i])])
         r < 0. && return δs[i]
         i += 1
     end
     k = sample(rng, Weights(pr))
-    return randsplitofsize(rng, x.parent, k)
+    return randsplitofsize(rng, γ, k)
 end
 
 
@@ -275,6 +269,10 @@ struct SplitCounts{T,V}
     smap::SplitDict{T,V}
     root::T
 end
+
+Base.iterate(x::SplitCounts) = iterate(x.smap)
+Base.iterate(x::SplitCounts, i) = iterate(x.smap, i)
+Base.length(x::SplitCounts) = length(x.smap)
 
 SplitCounts(root::T) where {T<:Integer} = SplitCounts(SplitDict{T,Int64}(), root)
 
@@ -328,7 +326,7 @@ function add_splits!(d, m, tree::Node, w=1)
             rght = walk(n[2])
             clade = left + rght
             x = min(left, rght)
-            !ischerry(clade) && update!(d, clade, x, w)
+            update!(d, clade, x, w)
             return clade
         end
     end
@@ -349,7 +347,6 @@ function add_splits_unrooted!(d, lmap, tree::Node, w=1)
             s2, b2 = walk(n[2])
             # clade below current node in pseudo-rooted tree
             c1 = s1 + s2
-            return c1, b1 + b2
             # s3 is the complement of that clade, i.e. the clade defined by the
             # bipartition in the unrooted tree induced by the branch leading to
             # n in the pseudo-rooted tree
@@ -399,6 +396,8 @@ function add_splits_unrooted!(d, lmap, tree::Node, w=1)
 end
 
 function update!(d, γ, δ::T, w::V) where {T,V}
+    # we don't store cherry clades
+    ischerry(γ) && return
     if !haskey(d, γ) 
         d[γ] = Dict(δ=>w)
     elseif !haskey(d[γ], δ)
@@ -408,6 +407,21 @@ function update!(d, γ, δ::T, w::V) where {T,V}
     end
 end
 
+function SplitCounts(xs::Vector{Branches{T}}, ws::Vector{V}) where {T,V}
+    d = SplitDict{T,V}()
+    for (x, w) in zip(xs, ws)
+        add_splits!(d, x, w)
+    end
+    return SplitCounts(d, maximum(keys(d)))
+end
+
+function add_splits!(d, x::Branches, w)
+    for i=length(x):-2:1
+        γ, δ, _ = x[i]
+        δ = min(δ, γ-δ)
+        update!(d, γ, δ, w)
+    end
+end
 
 # CCD
 # ===
@@ -431,7 +445,11 @@ end
 
 Base.haskey(x::CCD, γ) = haskey(x.smap, γ)
 Base.getindex(x::CCD, γ) = x.smap[γ] 
+Base.setindex!(x::CCD, v, γ) = x.smap[γ] = v
 Base.show(io::IO, x::CCD) = write(io, "CCD(Γ=$(x.root))")
+Base.iterate(x::CCD) = iterate(x.smap)
+Base.iterate(x::CCD, i) = iterate(x.smap, i)
+Base.length(x::CCD) = length(x.smap)
 
 # For the empirical CCD we need this function which 'normalizes' a dictionary
 function normalize(x::Dict)
@@ -440,16 +458,19 @@ function normalize(x::Dict)
 end
 
 # Construct the empirical CCD
-function CCD(splits::SplitCounts)
+function CCD(splits::SplitCounts, args...)
     smap = Dict(γ=>EmpiricalSplits(γ, normalize(x)) for (γ, x) in splits.smap)
     return CCD(smap, NoModel(), splits.root)
 end
 
 # Construct a beta-splitting CCD
 function CCD(splits::SplitCounts, bsd::BetaSplitTree, α=1.)
-    smap = Dict(γ=>NatBetaSplits(γ, x, bsd, α) for (γ, x) in splits.smap if !ischerry(γ))
+    smap = Dict(γ=>NatBetaSplits(γ, x, bsd, α) 
+                for (γ, x) in splits.smap if !ischerry(γ))
     return CCD(smap, bsd, splits.root)
 end
+
+tomoment(x::CCD) = CCD(Dict(γ=>tomoment(v) for (γ,v) in x), x.prior, x.root)
 
 
 # Sampling random cladograms from a CCD
@@ -464,11 +485,13 @@ randsplits(ccd::CCD) = randsplits(Random.default_rng(), ccd)
 randsplits(ccd::CCD, n::Int) = randsplits(Random.default_rng(), ccd, n)
 randsplits(rng, ccd::CCD, n::Int) = map(_->randsplits(rng, ccd), 1:n)
 
+randsplit(ccd, γ) = randsplit(Random.default_rng(), ccd, γ)
+randsplit(rng::AbstractRNG, ccd, γ) = haskey(ccd, γ) ? 
+    randsplit(rng, ccd[γ]) : randsplit(rng, ccd.prior, γ)
+
 function _randwalk!(rng::AbstractRNG, splits, clade, ccd)
     (ischerry(clade) || isleafclade(clade)) && return splits
-    left = haskey(ccd, clade) ? 
-        randsplit(rng, ccd[clade]) : 
-        randsplit(rng, ccd.prior, clade)
+    left = randsplit(rng, ccd, clade)
     rght = clade - left
     push!(splits, (clade, left))
     splits = _randwalk!(rng, splits, left, ccd)
@@ -518,34 +541,76 @@ end
 # Not sure about (3), perhaps we should enforce going through either (1) or
 # (2).
 
-"""
-    logpdf(ccd::CCD, splits::Splits)
+# Get the conditional clade probability
+logpdf(ccd::CCD, γ, δ) = haskey(ccd, γ) ? logpdf(ccd[γ], δ) : logpdf(ccd.prior, γ, δ)
 
-Log probability for a single collection of splits.
-"""
-function logpdf(ccd::CCD, splits::Splits)
+function logpdf(ccd::CCD, γ, d::AbstractDict)
     ℓ = 0.
-    for (γ, δ) in splits
-        ℓ += haskey(ccd, γ) ? logpdf(ccd[γ], δ) : logpdf(ccd.prior, γ, δ)
-    end
-    return isnan(ℓ) ? -Inf : ℓ
-end
-
-function logpdf(ccd::CCD, counts::SplitCounts)
-    ℓ = 0.
-    for (γ, d) in counts.smap
-        if haskey(ccd, γ)
-            x = ccd[γ]
-            for (δ, k) in d
-                ℓ += k*logpdf(x, δ)
-            end
-        else
-            for (δ, k) in d
-                ℓ += k*logpdf(ccd.prior, γ, δ)
-            end
+    if haskey(ccd, γ)
+        x = ccd[γ]
+        for (δ, k) in d
+            ℓ += k*logpdf(x, δ)
+        end
+    else
+        for (δ, k) in d
+            ℓ += k*logpdf(ccd.prior, γ, δ)
         end
     end
     return ℓ
 end
 
+"""
+    logpdf(ccd::CCD, splits::Splits)
+    logpdf(ccd::CCD, splits::SplitCounts)
+
+Log probability for a single collection of splits.
+"""
+function logpdf(ccd::CCD, splits)
+    ℓ = 0.
+    for (γ, δ) in splits
+        ℓ += logpdf(ccd, γ, δ)
+    end
+    return isnan(ℓ) ? -Inf : ℓ
+end
+
+"""
+    logpartition(x::CCD)
+
+Compute the log-partition function for `x`.
+
+The log-partition function of a categorical distribution on k categories with
+moment parameter `θ = (θ1, θ2, …, θ{k-1})` is `-log(1-∑i θi) = -log θk`. The
+CCD defines a categorical distribution on tree topologies. We have defined an
+order on trees (in particular we have a well-defined last tree, see `reftree`).
+So it appears we can easily compute -log θk. 
+"""
+logpartition(x::CCD) = -logpdf(x, reftree(x.root)) 
+
+# get the last tree in the induced tree order
+function reftree(x::T) where T
+    m = cladesize(x)
+    splits = Splits{T}(undef, m-1)
+    for k=m-1:-1:1
+        y = rootclade(k, T)
+        splits[m-k] = (x, y)
+        x = y
+    end
+    return splits
+end
+
+# this one uses `maxsplit` recursively, but for our current definition of
+# maxsplit, the above is more elegant
+#function reftree2(x::T) where T
+#    splits = Tuple{T,T}[]
+#    function walk(x)
+#        isleafclade(x) && return 
+#        a = maxsplit(x)
+#        b = x - a
+#        push!(splits, (x, min(a,b)))
+#        walk(a)
+#        walk(b)
+#    end
+#    walk(x)
+#    return splits
+#end
 

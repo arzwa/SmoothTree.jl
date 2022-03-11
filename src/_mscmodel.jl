@@ -12,77 +12,109 @@ multispecies coalescent model. Note that:
   Gaussians, one for each *clade*, i.e. representing the parameter for
   the branch leading to that clade as a crown group.
 """
-struct MSCModel{T,V,M,P}
-    S::CCD{T,M,P}        # species tree distribution approximation
-    ϕ::BranchModel{T,V}  # branch parameter distribution approximation
+struct MSCModel{T,V}
+    S::NatMBM{T,V}       # species tree distribution approximation
+    q::BranchModel{T,V}  # branch parameter distribution approximation
 end
 
 Base.show(io::IO, m::MSCModel) = write(io, "$(typeof(m))")
 
 # linear operations
-Base.:+(x::MSCModel, y::MSCModel) = MSCModel(x.S + y.S, x.ϕ + y.ϕ)
-Base.:-(x::MSCModel, y::MSCModel) = MSCModel(x.S - y.S, x.ϕ - y.ϕ)
-Base.:*(x::MSCModel, a) = MSCModel(x.S * a, x.ϕ * a)
-Base.:*(a, x::MSCModel) = MSCModel(x.S * a, x.ϕ * a)
-Base.copy(x::MSCModel) = MSCModel(copy(x.S), copy(x.ϕ))
+Base.:+(x::MSCModel, y::MSCModel) = MSCModel(x.S + y.S, x.q + y.q)
+Base.:-(x::MSCModel, y::MSCModel) = MSCModel(x.S - y.S, x.q - y.q)
+Base.:*(x::MSCModel, a) = MSCModel(x.S * a, x.q * a)
+Base.:*(a, x::MSCModel) = MSCModel(x.S * a, x.q * a)
 
 function add!(x::MSCModel, y::MSCModel)
     add!(x.S, y.S)
-    add!(x.ϕ, y.ϕ)
+    add!(x.q, y.q)
     return x
 end
 
 function sub!(x::MSCModel, y::MSCModel)
     sub!(x.S, y.S)
-    sub!(x.ϕ, y.ϕ)
+    sub!(x.q, y.q)
     return x
 end
 
 function mul!(x::MSCModel, a)
     mul!(x.S, a)
-    mul!(x.ϕ, a)
+    mul!(x.q, a)
     return x
 end
 
-# simulate a species tree from the MSCModel
-# speed-up by pre-allocating and indexing, not pushing to en empty array?
-randbranches(m::MSCModel) = randbranches(m.S, m.ϕ)
 
-function randbranches(S::CCD{T}, ϕ) where T
+# efficiency of randtree/randbranches is similar
+# randtree somewhat less efficient, but for larger models with more represented
+# splits the difference is negligible, for instance
+# julia> @btime randtree(alg.model);
+#  114.373 μs (203 allocations: 122.53 KiB)
+# julia> @btime randbranches(alg.model);
+#  113.998 μs (129 allocations: 119.28 KiB)
+# since working with trees is more elegant than the branches/splits structs,
+# perhaps we should? The coalescent sims are also marginally faster in the tree
+# case...
+#function randtree(model::MSCModel)
+#    tree = Node(model.S.root, Inf)
+#    _randtree(tree, model.S.root, model)
+#end
+#
+#function _randtree(node, γ, model)
+#    isleafclade(γ) && return node
+#    left = randsplit(model.S, γ)
+#    rght = γ - left
+#    dl = randbranch(model.q, γ, left)
+#    dr = randbranch(model.q, γ, rght)
+#    nl = Node(left, dl, node)
+#    nr = Node(rght, dr, node)
+#    _randtree(nl, left, model)
+#    _randtree(nr, rght, model)
+#    return node
+#end
+#
+#function randsplits(tree::SimpleNode{T}, init::V) where {T,V}
+#    _, splits = _coalsplits(tree, Splits{T}(), init) 
+#end
+
+## simulate a species tree from the MSCModel
+## speed-up by pre-allocating and indexing, not pushing to en empty array?
+randbranches(m::MSCModel) = randbranches(m.S, m.q)
+
+function randbranches(S::AbstractMBM{T}, q) where {T,V}
     branches = Branches{T}()
-    _randbranches(branches, S.root, S, ϕ)
+    _randbranches(branches, S.root, S, q)
 end
 
-function _randbranches(branches, γ, S, ϕ)
+function _randbranches(branches, γ, S, q)
     isleafclade(γ) && return branches
     left = randsplit(S, γ)
     rght = γ - left
-    dl = randbranch(ϕ, γ, left)
-    dr = randbranch(ϕ, γ, rght)
+    dl = randbranch(q, γ, left)
+    dr = randbranch(q, γ, rght)
     push!(branches, (γ, left, dl))
     push!(branches, (γ, rght, dr))
-    branches = _randbranches(branches, left, S, ϕ)
-    branches = _randbranches(branches, rght, S, ϕ)
+    branches = _randbranches(branches, left, S, q)
+    branches = _randbranches(branches, rght, S, q)
     return branches
 end
 
 # simulate species tree branches, modifying a pre-existing `Branches` vector
-randbranches!(b, m::MSCModel) = randbranches!(b, m.S, m.ϕ)
+randbranches!(b, m::MSCModel) = randbranches!(b, m.S, m.q)
 
-function randbranches!(branches, S, ϕ)
-    _randbranches!(branches, 1, S.root, S, ϕ)
+function randbranches!(branches, S, q)
+    _randbranches!(branches, 1, S.root, S, q)
 end
 
-function _randbranches!(branches, i, γ, S, ϕ)
+function _randbranches!(branches, i, γ, S, q)
     isleafclade(γ) && return i
     left = randsplit(S, γ)
     rght = γ - left
-    dl = randbranch(ϕ, γ, left)
-    dr = randbranch(ϕ, γ, rght)
+    dl = randbranch(q, γ, left)
+    dr = randbranch(q, γ, rght)
     branches[i]   = (γ, left, dl)
     branches[i+1] = (γ, rght, dr)
-    j = _randbranches!(branches, i+2, left, S, ϕ)
-    j = _randbranches!(branches, j, rght, S, ϕ)
+    j = _randbranches!(branches, i+2, left, S, q)
+    j = _randbranches!(branches, j, rght, S, q)
     return j
 end
 
@@ -107,14 +139,14 @@ function randsplits(branches::Branches{T}, init::V) where {T,V}
 end
 
 function matchmoments(branches, weights, cavity::MSCModel, α)
-    S = CCD(SplitCounts(branches, weights), cavity.S.prior, α)
-    ϕ = matchmoments(branches, weights, cavity.ϕ)
-    return MSCModel(S, ϕ)
+    S = NatMBM(CCD(branches, weights), cavity.S.beta, α)
+    q = matchmoments(branches, weights, cavity.q)
+    return MSCModel(S, q)
 end
 
 function prune!(model::MSCModel, atol=1e-9)
-    #prune!(model.S, atol)
-    prune!(model.ϕ, atol)
+    prune!(model.S, atol)
+    prune!(model.q, atol)
 end
 
 """
@@ -122,7 +154,7 @@ end
 
 Compute the logpartition function of the MSCModel.
 """
-logpartition(model::MSCModel) = logpartition(model.S) + logpartition(model.ϕ)
+logpartition(model::MSCModel) = logpartition(model.S) + logpartition(model.q)
 
 """
     logpdf(model, branches)
@@ -131,20 +163,20 @@ function logpdf(model::MSCModel, branches::Branches)
     l = 0.
     for i=1:2:length(branches)
         γ, δ, d = branches[i]
-        l += logpdf(model.S, γ, min(γ-δ, δ))
-        isfinite(d) && (l += logpdf(model.ϕ, γ, δ, d))
+        l += splitpdf(model.S, γ, min(γ-δ, δ))
+        isfinite(d) && (l += logpdf(model.q, γ, δ, d))
         γ, δ, d = branches[i+1]
-        isfinite(d) && (l += logpdf(model.ϕ, γ, δ, d))
+        isfinite(d) && (l += logpdf(model.q, γ, δ, d))
     end
     return l
 end
 
 # Get the Gaussian approximations for the branch lengths under the model given
 # a tree.
-function getbranchapprox(ϕ, splits::Splits)
+function getbranchapprox(q, splits::Splits)
     branches = mapreduce(x->[x, (x[1], x[1]-x[2])], vcat, splits)
     map(branches) do (γ, δ)
-        μ, V = gaussian_nat2mom(ϕ[(γ, δ)])
+        μ, V = gaussian_nat2mom(q[(γ, δ)])
         (γ, δ, Normal(μ, √V))
     end
 end
@@ -158,19 +190,19 @@ function traceback(trace::Vector{<:MSCModel})
     ss = allsplits(trace[end].S)
     bs = allbranches(trace[end].S)
     Ms = MomMBM.(getfield.(trace, :S))
-    ϕs = getfield.(trace, :ϕ)
+    qs = getfield.(trace, :q)
     strace = mapreduce(x->[x[γ,δ] for (γ,δ) in ss], hcat, Ms) |> permutedims
-    btrace = mapreduce(x->[x[γ,δ] for (γ,δ) in bs], hcat, ϕs) |> permutedims
+    btrace = mapreduce(x->[x[γ,δ] for (γ,δ) in bs], hcat, qs) |> permutedims
     X = gaussian_nat2mom.(btrace)
     return (θ=strace, μ=first.(X), V=last.(X))
 end
 
-# assumes the MAP tree is represented (otherwise not well defined anyhow...) 
+# assumes the MAP tree is represented (otherwise notw ell defined anyhow...) 
 function maptree(model::MSCModel{T}) where T
-    _maptree(Node(model.S.root), model.S.root, model.S, model.ϕ)
+    _maptree(Node(model.S.root), model.S.root, model.S, model.q)
 end
 
-function _maptree(node, γ, S, ϕ)
+function _maptree(node, γ, S, q)
     isleafclade(γ) && return node
     if ischerry(γ)
         left = randsplit(S, γ)
@@ -180,12 +212,12 @@ function _maptree(node, γ, S, ϕ)
         left = argmax(last, ps)[1]
     end
     rght = γ - left
-    dl = exp(gaussian_nat2mom(ϕ[(γ,left)])[1])
-    dr = exp(gaussian_nat2mom(ϕ[(γ,rght)])[1])
+    dl = exp(gaussian_nat2mom(q[(γ,left)])[1])
+    dr = exp(gaussian_nat2mom(q[(γ,rght)])[1])
     push!(node, Node(left, d=dl))
     push!(node, Node(rght, d=dr))
-    _maptree(node[1], left, S, ϕ)
-    _maptree(node[2], rght, S, ϕ)
+    _maptree(node[1], left, S, q)
+    _maptree(node[2], rght, S, q)
     return node
 end
 

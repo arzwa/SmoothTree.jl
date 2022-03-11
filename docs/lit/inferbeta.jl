@@ -1,3 +1,4 @@
+using Pkg; Pkg.activate(@__DIR__)
 using Turing, Optim
 using Distributions, SmoothTree, NewickTree, Serialization
 
@@ -24,7 +25,28 @@ logpdf(model, X[1])
     end
 end
 
-chain = sample(betainfer(X, root, length(taxa)), NUTS(), 200)
+chain = sample(betainfer(X, root, length(taxa)), NUTS(), 500)
+
+#Chains MCMC chain (500×13×1 Array{Float64, 3}):
+#
+#Iterations        = 1:1:500
+#Number of chains  = 1
+#Samples per chain = 500
+#parameters        = β
+#internals         = acceptance_rate, hamiltonian_energy, hamiltonian_energy_error, is_accept, log_density, lp, max_hamiltonian_energy_error, n_steps, nom_step_size, numerical_error, step_size, tree_depth
+#
+#Summary Statistics
+#  parameters      mean       std   naive_se      mcse        ess      rhat
+#      Symbol   Float64   Float64    Float64   Float64    Float64   Float64
+#
+#           β   -1.1496    0.0006     0.0000    0.0000   330.9248    0.9996
+#
+#Quantiles
+#  parameters      2.5%     25.0%     50.0%     75.0%     97.5%
+#      Symbol   Float64   Float64   Float64   Float64   Float64
+#
+#           β   -1.1506   -1.1500   -1.1496   -1.1492   -1.1485
+#
 
 result = optimize(betainfer(X, root, length(taxa)), MLE())
 

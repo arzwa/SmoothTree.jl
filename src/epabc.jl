@@ -76,7 +76,7 @@ end
 #     that is quite bug-prone... better separate the marginal likelihood update
 #     from the model update... so that we don't need to compute the cavity
 #     partition function here...
-function update!(alg, full, i, lZ)
+function update!(alg::EPABC, full, i, lZ)
     @unpack λ, prunetol = alg
     @assert !(alg.model === full)
     Zcav = isfinite(lZ) ? logpartition(alg.model) : -Inf
@@ -247,14 +247,14 @@ end
 
 function simulate!(particles, model::MSCModel)
     # it is quite a bit faster to convert to MomMBM on beforehand
-    m = MomMBM(model.S)
+    m = tomoment(model.S)
     Threads.@threads for i=1:length(particles)
         simfun!(particles[i], model, m)
     end
 end
 
 function simfun!(p, model, m)
-    randbranches!(p.S, m, model.q)
+    randbranches!(p.S, m, model.ϕ)
     p.w = logpdf(model, p.S)
 end
 
