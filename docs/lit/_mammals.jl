@@ -6,10 +6,11 @@ using SmoothTree, NewickTree, StatsBase, ThreadTools, JSON
 fnames = readdir("docs/data/mammals-song/424genes.ufboot", join=true)
 function tfun(fpath) 
     ts = readnw.(readlines(fpath))
-    ts = SmoothTree.rootall!(ts, "Gal")
+    ts = SmoothTree.rootall(ts, "Gal")
+    @info fpath
     countmap(ts)
 end
-boots = tmap(tfun, fnames)
+boots = tmap(tfun, rand(fnames, 50))
 
 # load summarized data
 # this also takes a while...
@@ -19,28 +20,18 @@ boots = tmap(tfun, fnames)
 trees = readnw.(readlines("docs/data/mammals-song/mltrees.nw"))
 
 # get the taxon map
-taxa = taxonmap(trees, UInt64)
-ntaxa = length(taxa)
+spmap = clademap(trees[1], UInt64)
+ntaxa = length(spmap)
 
 # get the CCDs
-data = CCD.(boots, Ref(taxa))
+data = Locus.(boots, Ref(spmap), prior=BetaSplitTree(-1., ntaxa), α=1e-3)
 
 # prior settings
-Sprior = NatMBM(CCD(unique(trees), taxa), BetaSplitTree(-1., ntaxa), 100.)
-θprior = BranchModel(UInt64, gaussian_mom2nat([log(1.), 2.]))
-model  = MSCModel(Sprior, θprior, taxa)
+Sprior = CCD(SplitCounts(unique(trees), spmap), BetaSplitTree(-1., ntaxa), 1.)
+θprior = BranchModel(rootclade(spmap), gaussian_mom2nat([log(1.), 2.]))
+model  = MSCModel(Sprior, θprior)
 
 # set up the algorithm
-alg   = EPABC(data[1:10], model, λ=0.1, α=1/2^(ntaxa-1), minacc=20,
-              target=100, prunetol=1e-6)
+alg   = EPABCIS(data, model, 100000, target=200, miness=5., λ=0.1, α=1e-2, c=0.95)
+trace = ep!(alg, 5, traceit=1)
 
-# run it
-trace = pep!(alg, 1)
-trace = ep!(alg, 3)
-SmoothTree.tuneoff!(alg)
-trace = [trace ; ep!(alg, 3)]
-
-# save trace
-open("epabc-trace.json", "w") do io
-    JSON.print(traceback(trace))
-end

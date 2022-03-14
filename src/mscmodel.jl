@@ -175,7 +175,7 @@ function _maptree(node, γ, S, ϕ)
     if ischerry(γ)
         left = randsplit(S, γ)
     else
-        ss = nat2mom(S[γ])
+        ss = tomoment(S[γ])
         ps = collect(ss.splits)
         left = argmax(last, ps)[1]
     end

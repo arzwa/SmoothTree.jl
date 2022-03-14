@@ -275,12 +275,13 @@ Base.iterate(x::SplitCounts, i) = iterate(x.smap, i)
 Base.length(x::SplitCounts) = length(x.smap)
 
 SplitCounts(root::T) where {T<:Integer} = SplitCounts(SplitDict{T,Int64}(), root)
+SplitCounts(n::Node, m::AbstractDict) = SplitCounts([n], m)
 
 # some inelegant code repetition here...
-SplitCounts(d::AbstractDict, m::AbstractDict; rooted=true) = 
+SplitCounts(d::AbstractDict, m::AbstractDict) = 
     SplitCounts(collect(keys(d)), m, collect(values(d)))
 
-SplitCountsUnrooted(d::AbstractDict, m::AbstractDict; rooted=true) = 
+SplitCountsUnrooted(d::AbstractDict, m::AbstractDict) = 
     SplitCountsUnrooted(collect(keys(d)), m, collect(values(d)))
 
 function SplitCounts(ts, m::AbstractDict{T}, ws::AbstractVector{V}) where {T,V}
@@ -508,19 +509,22 @@ randtree(rng::AbstractRNG, ccd::CCD, lmap, n) = map(_->randtree(rng, ccd, lmap),
 
 function randtree(rng::AbstractRNG, ccd::CCD, lmap)
     splits = randsplits(rng, ccd)
-    gettree(splits, lmap)
+    gettree_addcherry(splits, lmap)
 end
 
-function gettree(splits::Splits{T}, names) where T
+# Note that for the CCD, we don't simulate the cherry splits (we could, but it
+# is not necessary, and spares some unncessary computation). This leads however
+# to a slight modification to get a tree from a set of splits.
+function gettree_addcherry(splits::Splits{T}, names) where T
     nodes = Dict{T,DefaultNode{T}}()
     for (γ, δ) in splits
-        p, l, r = map(c->_getnode!(nodes, names, c), [γ, δ, γ-δ])
+        p, l, r = map(c->_getnode_addcherry!(nodes, names, c), [γ, δ, γ-δ])
         push!(p, l, r)   
     end
     return getroot(nodes[splits[end][1]])
 end
 
-function _getnode!(nodes, names, n)
+function _getnode_addcherry!(nodes, names, n)
     isleafclade(n) && return Node(n, n=names[n])
     haskey(nodes, n) && return nodes[n]
     nodes[n] = Node(n)

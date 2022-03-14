@@ -98,6 +98,22 @@ end
 randtree(model::MSC, lmap::AbstractDict) = gettree(randsplits(model), lmap)
 randtree(model::MSC, lmap::AbstractDict, n) = map(_->randtree(model, lmap), 1:n)
 
+function gettree(splits::Splits{T}, names) where T
+    nodes = Dict{T,DefaultNode{T}}()
+    for (γ, δ) in splits
+        p, l, r = map(c->_getnode!(nodes, names, c), [γ, δ, γ-δ])
+        push!(p, l, r)   
+    end
+    return getroot(nodes[splits[end][1]])
+end
+
+function _getnode!(nodes, names, n)
+    isleafclade(n) && return Node(n, n=names[n])
+    haskey(nodes, n) && return nodes[n]
+    nodes[n] = Node(n)
+    return nodes[n]
+end
+
 # non-recursive version -- takes the same amount of time and has exactly the
 # same amount of allocations... (recursive version seems even to have a slight
 # edge, because it doesn't have to store the states at internal nodes I guess)

@@ -110,23 +110,23 @@ vline!([θ[2]], color=:black, ls=:dot)
 # EP inference
 root   = 0x000f
 bsd    = BetaSplitTree(-1.5, cladesize(root))
-Sprior = NatMBM(root, bsd)
+Sprior = CCD(SplitCounts(root), bsd)
 tips   = collect(keys(m))
 θprior = BranchModel(root, SmoothTree.gaussian_mom2nat([mean(prior), std(prior)^2]), 
                      inftips=tips)
-data   = SmoothTree.Locus.(Y, Ref(m), 1e-9, -1.5)
+data   = SmoothTree.Locus.(Y, Ref(m), prior=bsd, α=1e-9)
 model  = MSCModel(Sprior, θprior)
 alg    = SmoothTree.EPABCIS(data, model, 10000, target=1000, miness=10.)
 trace  = ep!(alg, 10);
 post   = alg.model
 
-relabel.(randtree(alg.model.S, 10000), Ref(m)) |> ranking
+randtree(alg.model.S, m, 10000) |> ranking
 
 # posterior approximation for the relevant branch lengths
 c1 = (0x0007, 0x0003)
 c2 = (0x000f, 0x0007)
-lm1, V1 = SmoothTree.gaussian_nat2mom(post.q[c1])
-lm2, V2 = SmoothTree.gaussian_nat2mom(post.q[c2])
+lm1, V1 = SmoothTree.gaussian_nat2mom(post.ϕ[c1])
+lm2, V2 = SmoothTree.gaussian_nat2mom(post.ϕ[c2])
 d1 = Normal(lm1, √V1)
 d2 = Normal(lm2, √V2)
 
