@@ -19,8 +19,8 @@ Sprior = CCD(SplitCounts(root), BetaSplitTree(-1.5, ntaxa))
 ϕprior = BranchModel(root, gaussian_mom2nat([μ, V]))
 model  = MSCModel(Sprior, ϕprior)
 
-data1 = Locus.(mltrees, Ref(spmap), prior=BetaSplitTree(-1.5, ntaxa), α=1e-6)
-data2 = Locus.(mbdata,  Ref(spmap), prior=BetaSplitTree(-1.5, ntaxa), α=1e-6)
+data1 = Locus.(mltrees, Ref(spmap), prior=BetaSplitTree(-1.5, ntaxa), α=1e-4)
+data2 = Locus.(mbdata,  Ref(spmap), prior=BetaSplitTree(-1.5, ntaxa), α=1e-4)
 
 alg1   = EPABCIS(data1, model, 50000, target=200, miness=10., λ=0.1, α=1e-4, c=0.95)
 trace1 = ep!(alg1, 5)
@@ -51,10 +51,20 @@ end |> xs->plot(xs...)
 
 # SIS
 using SmoothTree: EPABCSIS
-alg = EPABCSIS(data2, model, 10000, 5, target=200, miness=10., λ=0.1, α=1e-4, c=0.95)
-trace = ep!(alg, 2)
+alg1   = EPABCSIS(data1, model, 10000, 10, target=200, miness=10., λ=0.1, α=1e-4, c=0.95)
+trace1 = ep!(alg1, 5)
 
-randtree(alg.model.S, spmap, 10000) |> ranking
+alg2   = EPABCSIS(data2, model, 10000, 10, target=200, miness=10., λ=0.1, α=1e-4, c=0.95)
+trace2 = ep!(alg2, 5)
+
+plot(getfield.(trace1, :ev), legend=:topleft)
+plot!(getfield.(trace2, :ev), legend=:topleft)
+
+plot(sort(alg1.siteC), legend=:bottomright)
+plot!(sort(alg2.siteC))
+
+randtree(alg1.model.S, spmap, 10000) |> ranking
+randtree(alg2.model.S, spmap, 10000) |> ranking
 
 
 # Unrooted

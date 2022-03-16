@@ -113,7 +113,7 @@ function matchmoments(branches, weights, cavity::MSCModel, α)
 end
 
 function prune!(model::MSCModel, atol=1e-9)
-    #prune!(model.S, atol)
+    prune!(model.S, atol)
     prune!(model.ϕ, atol)
 end
 
@@ -141,9 +141,8 @@ end
 
 # Get the Gaussian approximations for the branch lengths under the model given
 # a tree.
-function getbranchapprox(ϕ, splits::Splits)
-    branches = mapreduce(x->[x, (x[1], x[1]-x[2])], vcat, splits)
-    map(branches) do (γ, δ)
+function getbranchapprox(ϕ, splits::AbstractVector)
+    map(splits) do (γ, δ, _)
         μ, V = gaussian_nat2mom(ϕ[(γ, δ)])
         (γ, δ, Normal(μ, √V))
     end

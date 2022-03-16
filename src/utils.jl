@@ -36,6 +36,11 @@ function rootall(trees, leaf)
     map(f, trees)
 end
 
+function rootall!(trees, leaf)
+    f = x->getroot(NewickTree.set_outgroup!(x, leaf))
+    map(f, trees)
+end
+
 # utilities for setting species tree branch lengths
 n_internal(S) = length(postwalk(S)) - length(getleaves(S)) - 1
 

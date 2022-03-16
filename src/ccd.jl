@@ -154,6 +154,18 @@ end
 Base.getindex(x::MBMSplits, δ) = haskey(x, δ) ? 
     x.splits[δ] : x.η0[splitsize(x.parent, δ)]
 
+function prune!(x::MBMSplits, atol)
+    for (δ, v) in x
+        s = splitsize(x.parent, δ)
+        if isapprox(exp(v), exp(x.η0[s]), atol=atol)
+            delete!(x.splits, δ)
+            x.k[s] += 1
+        end
+    end 
+    return x
+end
+
+
 """
     NatBetaSplits(clade, counts, bsd, α)
 
@@ -472,6 +484,26 @@ function CCD(splits::SplitCounts, bsd::BetaSplitTree, α=1.)
 end
 
 tomoment(x::CCD) = CCD(Dict(γ=>tomoment(v) for (γ,v) in x), x.prior, x.root)
+
+function prune!(x::CCD{T,V}, atol) where {T,V}
+    clades = Set(x.root)
+    empty = Set{T}()
+    for (γ, v) in x
+        prune!(v, atol)
+        # all splits with non-negligible probabilities are to be kept
+        # note that we also need to keep the complements, which are
+        # not in the split distribution of γ but may have their own
+        # split distribution in the smap!
+        union!(clades, keys(v.splits))
+        union!(clades, γ .- keys(v.splits))  
+        length(v) == 0 && union!(empty, γ)
+    end
+    # those clades nowhere seen will be deleted
+    toprune = setdiff(keys(x.smap), clades)  
+    for γ in union(toprune, empty)
+        delete!(x.smap, γ)
+    end
+end
 
 
 # Sampling random cladograms from a CCD

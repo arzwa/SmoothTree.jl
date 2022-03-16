@@ -29,19 +29,24 @@ function Base.show(io::IO, m::BiMap{T,V}) where {T,V}
 end
 
 # a clademap
-clademap(tree::Node{T})   where T = clademap(name.(getleaves(tree)), T)
-clademap(tree, ::Type{T}) where T = clademap(name.(getleaves(tree)), T)
-clademap(trees::AbstractDict) = clademap(collect(keys(trees)))
-clademap(trees::Vector{<:Node{T}}) where T = clademap(trees, T)
+#function clademap(trees::Vector{<:Node}, T)
+#    leaves = unique(mapreduce(x->name.(getleaves(x)), vcat, trees))
+#    return clademap(leaves, T)
+#end
 
-function clademap(trees::Vector{<:Node}, T)
-    leaves = unique(mapreduce(x->name.(getleaves(x)), vcat, trees))
-    return clademap(leaves, T)
-end
+clademap(tree::Node, args...) = clademap(name.(getleaves(tree)), args...)
 
-function clademap(l::Vector{String}, ::Type{T}=UInt16) where T
+function clademap(taxa::Vector{String}, ::Type{T}=cladetype(taxa)) where T
+    l = sort(taxa)
     d = Dict(T(2^i)=>l[i+1] for i=0:length(l)-1)
     return BiMap(d)
+end
+
+function cladetype(taxa)
+    n = length(taxa)
+    @assert n <= 64
+    T = n <= 8 ? UInt8 : n <= 16 ? UInt16 : n <= 32 ? UInt32 : UInt64
+    return T
 end
 
 function getclade(m::BiMap{T,String}, clade::Vector{String}) where T  

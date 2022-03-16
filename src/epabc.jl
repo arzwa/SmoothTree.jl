@@ -55,7 +55,7 @@ function update_model!(alg::EPABC, i, new_approx)
     # here we mutate `new_approx` to get the site update, which is the only
     # thing we will need in the remainder
     siteup = mul!(sub!(new_approx, alg.model), alg.λ)   # λ(q∗ - q)
-    #prunetol != 0. && prune!(siteup, prunetol)  # should we?
+    alg.prunetol != 0. && prune!(siteup, alg.prunetol)  # should we?
     add!(alg.model, siteup)  # mutates the model, to get the new approximation
     update_site!(alg.sites, i, siteup)
 end
@@ -306,8 +306,8 @@ function ep_serial!(alg::EPABC{<:SIS}; rnd=true, traceit=10000)
     result = (result..., ev=-Inf)
     trace = typeof(result)[]
     for (j, i) in enumerate(iter)
-        report = [result.neff, result.ev, result.nacc, result.fail]
-        desc = string(@sprintf("%4d %8.1f %9.3f %6d %2d", i, report...))
+        report = [result.neff, result.ev, result.nacc, result.fail, result.m]
+        desc = string(@sprintf("%4d %8.1f %9.3f %6d %2d %2d", i, report...))
         set_description(iter, desc)
         result = ep_iteration!(alg, i)
         !result.fail && update!(alg, result)
@@ -323,23 +323,29 @@ function ep_iteration!(alg::EPABC{<:SIS}, i)
     X = data[i]
     getcavity!(alg, i)
     Φ_cavity = logpartition(alg.model)
-    g, rest = sis_inner!(sims, alg.model, alg.model, X, α, c) 
-    for m=1:M-1
-        g, rest = sis_inner!(sims, g, alg.model, X, α, c) 
+    g, rest = sis_inner!(sims, alg.model, alg.model, X, α, c, miness) 
+    m = 1
+    while rest.neff < target && m < M
+        g, rest = sis_inner!(sims, g, alg.model, X, α, c, miness) 
+        m += 1
     end
     uncavity!(alg, i)
     fail = rest.neff < miness || !isfinite(rest.Zhat)
-    result = (rest..., i=i, new_approx=g, Φ_cavity=Φ_cavity, fail=fail)
+    result = (rest..., m=m, i=i, new_approx=g, Φ_cavity=Φ_cavity, fail=fail)
     return result
 end
 
-function sis_inner!(sims, g, prior, X, α, c)
+function sis_inner!(sims, g, prior, X, α, c, miness)
     simulate!(sims, g)
     w = map(p->logpdf(prior, p.S) - p.w, sims)
     data_likelihood!(w, X, sims)
     W, neff, Zhat, accept = process_weights(w, c)
     branches = alltrees(sims)[accept]
-    g′ = matchmoments(branches, W, g, α)
+    if neff < miness
+        g′ = prior
+    else
+        g′ = matchmoments(branches, W, g, α)
+    end
     g′, (neff=neff, Zhat=Zhat, nacc=sum(accept))
 end
 

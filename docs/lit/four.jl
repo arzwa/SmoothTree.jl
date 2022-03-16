@@ -30,7 +30,7 @@ SmoothTree.setdistance!(S, Inf)
 SmoothTree.setdistance_internal!(S, exp.(θ))
 
 # Simulate a data set
-m = clademap(S)
+m = clademap(S, UInt16)
 M = SmoothTree.MSC(S, m)
 N = 200
 Y = randtree(M, m, N)
@@ -116,8 +116,9 @@ tips   = collect(keys(m))
                      inftips=tips)
 data   = SmoothTree.Locus.(Y, Ref(m), prior=bsd, α=1e-9)
 model  = MSCModel(Sprior, θprior)
-alg    = SmoothTree.EPABCIS(data, model, 10000, target=1000, miness=10.)
-trace  = ep!(alg, 10);
+#alg    = SmoothTree.EPABCIS(data, model, 10000, target=1000, miness=10.)
+alg    = SmoothTree.EPABCSIS(data, model, 10000, 5, target=1000, miness=10., prunetol=0.)
+trace  = ep!(alg, 5);
 post   = alg.model
 
 randtree(alg.model.S, m, 10000) |> ranking

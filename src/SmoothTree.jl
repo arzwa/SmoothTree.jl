@@ -4,7 +4,7 @@ using NewickTree, StatsBase, Parameters, Random, StatsFuns, Distributions
 using Printf, ProgressBars, SpecialFunctions, ThreadTools, LinearAlgebra
 import Distributions: logpdf
 
-export clademap, rootall, rootclade, cladesize, ranking
+export clademap, rootall!, rootclade, cladesize, ranking
 export SplitCounts, SplitCountsUnrooted
 export BetaSplitTree
 export CCD, randsplits, randtree, randbranches
