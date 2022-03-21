@@ -28,12 +28,6 @@ function Base.show(io::IO, m::BiMap{T,V}) where {T,V}
     end
 end
 
-# a clademap
-#function clademap(trees::Vector{<:Node}, T)
-#    leaves = unique(mapreduce(x->name.(getleaves(x)), vcat, trees))
-#    return clademap(leaves, T)
-#end
-
 clademap(tree::Node, args...) = clademap(name.(getleaves(tree)), args...)
 
 function clademap(taxa::Vector{String}, ::Type{T}=cladetype(taxa)) where T

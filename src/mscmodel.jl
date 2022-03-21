@@ -45,33 +45,15 @@ function mul!(x::MSCModel, a)
 end
 
 # simulate a species tree from the MSCModel
-# speed-up by pre-allocating and indexing, not pushing to en empty array?
-randbranches(m::MSCModel) = randbranches(m.S, m.ϕ)
-
-function randbranches(S::CCD{T}, ϕ) where T
-    branches = Branches{T}()
-    _randbranches(branches, S.root, S, ϕ)
-end
-
-function _randbranches(branches, γ, S, ϕ)
-    isleafclade(γ) && return branches
-    left = randsplit(S, γ)
-    rght = γ - left
-    dl = randbranch(ϕ, γ, left)
-    dr = randbranch(ϕ, γ, rght)
-    push!(branches, (γ, left, dl))
-    push!(branches, (γ, rght, dr))
-    branches = _randbranches(branches, left, S, ϕ)
-    branches = _randbranches(branches, rght, S, ϕ)
-    return branches
-end
-
 # simulate species tree branches, modifying a pre-existing `Branches` vector
-randbranches!(b, m::MSCModel) = randbranches!(b, m.S, m.ϕ)
-
-function randbranches!(branches, S, ϕ)
-    _randbranches!(branches, 1, S.root, S, ϕ)
+function randbranches(m::MSCModel{T}) where T
+    n = cladesize(m.S.root)
+    b = Branches(undef, T, 2n-2)
+    randbranches!(b, m)
+    return b
 end
+randbranches!(b, m::MSCModel) = randbranches!(b, m.S, m.ϕ)
+randbranches!(branches, S, ϕ) = _randbranches!(branches, 1, S.root, S, ϕ)
 
 function _randbranches!(branches, i, γ, S, ϕ)
     isleafclade(γ) && return i
@@ -129,11 +111,8 @@ logpartition(model::MSCModel) = logpartition(model.S) + logpartition(model.ϕ)
 """
 function logpdf(model::MSCModel, branches::Branches)
     l = 0.
-    for i=1:2:length(branches)
-        γ, δ, d = branches[i]
-        l += logpdf(model.S, γ, min(γ-δ, δ))
-        isfinite(d) && (l += logpdf(model.ϕ, γ, δ, d))
-        γ, δ, d = branches[i+1]
+    for (γ, δ, d) in branches
+        (δ < γ - δ) && (l += logpdf(model.S, γ, δ))
         isfinite(d) && (l += logpdf(model.ϕ, γ, δ, d))
     end
     return l
@@ -141,7 +120,7 @@ end
 
 # Get the Gaussian approximations for the branch lengths under the model given
 # a tree.
-function getbranchapprox(ϕ, splits::AbstractVector)
+function getbranchapprox(ϕ, splits::Branches)
     map(splits) do (γ, δ, _)
         μ, V = gaussian_nat2mom(ϕ[(γ, δ)])
         (γ, δ, Normal(μ, √V))
@@ -165,26 +144,43 @@ function traceback(trace::Vector{<:MSCModel})
 end
 
 # assumes the MAP tree is represented (otherwise not well defined anyhow...) 
-function maptree(model::MSCModel{T}) where T
-    _maptree(Node(model.S.root), model.S.root, model.S, model.ϕ)
+function maptree(model::MSCModel{T}, spmap) where T
+    _maptree(Node(model.S.root), model.S.root, model.S, model.ϕ, spmap)
 end
 
-function _maptree(node, γ, S, ϕ)
+function _maptree(node, γ, S, ϕ, spmap)
     isleafclade(γ) && return node
     if ischerry(γ)
         left = randsplit(S, γ)
     else
-        ss = tomoment(S[γ])
-        ps = collect(ss.splits)
+        #ss = tomoment(S[γ])
+        ps = collect(S[γ].splits)
         left = argmax(last, ps)[1]
     end
     rght = γ - left
+    nl = isleafclade(left) ? spmap[left] : ""
+    nr = isleafclade(rght) ? spmap[rght] : ""
     dl = exp(gaussian_nat2mom(ϕ[(γ,left)])[1])
     dr = exp(gaussian_nat2mom(ϕ[(γ,rght)])[1])
-    push!(node, Node(left, d=dl))
-    push!(node, Node(rght, d=dr))
-    _maptree(node[1], left, S, ϕ)
-    _maptree(node[2], rght, S, ϕ)
+    push!(node, Node(left, d=dl, n=nl))
+    push!(node, Node(rght, d=dr, n=nr))
+    _maptree(node[1], left, S, ϕ, spmap)
+    _maptree(node[2], rght, S, ϕ, spmap)
     return node
 end
+
+function addmapbranches!(tree, spmap, ϕ::BranchModel)
+    function walk(n)
+        isleaf(n) && return n, spmap[name(n)]
+        c1, δ1 = walk(n[1])
+        c2, δ2 = walk(n[2])
+        γ = δ1 + δ2
+        c1.data.distance = exp(gaussian_nat2mom(ϕ[(γ,δ1)])[1])
+        c2.data.distance = exp(gaussian_nat2mom(ϕ[(γ,δ2)])[1])
+        return n, γ
+    end     
+    walk(tree)
+    return tree
+end
+
 

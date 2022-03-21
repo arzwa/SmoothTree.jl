@@ -26,6 +26,10 @@ function evidence(alg)
     sum(alg.siteC) + logpartition(alg.model) - logpartition(getprior(alg))
 end
 
+function evidence_upperbound(alg)
+    sum(filter(isfinite, alg.siteC)) + logpartition(alg.model) - logpartition(getprior(alg))
+end
+
 # get the prior
 getprior(alg) = alg.sites[end]
 
@@ -81,14 +85,14 @@ end
     c::Float64 = 0.0   # rejection control quantile
 end
 
-# in the general case we cannot recycle gene trees... so don't store them
-mutable struct Particle{T}
-    S::Branches{T}  # species tree
+# A struct for a weighted particle
+mutable struct Particle{X}
+    S::X        # species tree
     w::Float64  # sampler density
 end
 
 # undef initialized particle
-Particle(n::Int, ::Type{T}) where T = Particle(Branches{T}(undef, n), 0.)
+Particle(n::Int, ::Type{T}) where T = Particle(Branches(undef, T, n), 0.)
 
 # Kong's ESS estimator
 ess(w) = 1/sum(w .^ 2) 
@@ -242,10 +246,11 @@ end
 
 # This needs to be improved, to allow for Multivariate Gaussian approximating
 # families...
+const BranchOnly = Union{<:BranchModel,<:NaturalMvNormal}
 
-function EPABCIS(data, b::Branches, prior::BranchModel{T,V}, N; 
-                 λ=0.1, prunetol=1e-9, kwargs...) where {T,V}
-    sites = Vector{BranchModel{T,V}}(undef, length(data)+1)
+function EPABCIS(data, b::Branches{T,V}, prior::M, N; 
+                 λ=0.1, prunetol=0., kwargs...) where {T,V,M<:BranchOnly}
+    sites = Vector{M}(undef, length(data)+1)
     siteC = fill(-Inf, length(data))
     sites[end] = prior  # last entry is the prior
     sims = map(_->Particle(copy(b), -Inf), 1:N)
@@ -299,6 +304,17 @@ function EPABCSIS(data, prior::MSCModel{T,V}, N, M;
                 siteupdate=siteupdate, λ=λ, prunetol=prunetol)
 end
 
+function EPABCSIS(data, b::Branches, prior::X, N, M; 
+                 λ=0.1, prunetol=0., kwargs...) where {T,V,X<:BranchOnly}
+    sites = Vector{X}(undef, length(data)+1)
+    siteC = fill(-Inf, length(data))
+    sites[end] = prior  # last entry is the prior
+    sims = map(_->Particle(copy(b), -Inf), 1:N)
+    siteupdate = SIS(N=N, M=M, sims=sims; kwargs...)
+    alg = EPABC(data=data, model=deepcopy(prior), sites=sites, siteC=siteC,
+                siteupdate=siteupdate, λ=λ, prunetol=prunetol)
+end
+
 function ep_serial!(alg::EPABC{<:SIS}; rnd=true, traceit=10000) 
     rnge = rnd ? shuffle(1:length(alg.data)) : 1:length(alg.data)
     iter = ProgressBar(rnge)
@@ -337,7 +353,8 @@ end
 
 function sis_inner!(sims, g, prior, X, α, c, miness)
     simulate!(sims, g)
-    w = map(p->logpdf(prior, p.S) - p.w, sims)
+    #w = map(p->logpdf(prior, p.S) - p.w, sims)
+    w = logweights(sims, prior)
     data_likelihood!(w, X, sims)
     W, neff, Zhat, accept = process_weights(w, c)
     branches = alltrees(sims)[accept]

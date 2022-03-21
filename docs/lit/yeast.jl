@@ -1,81 +1,131 @@
 using Pkg; Pkg.activate(@__DIR__)
 using SmoothTree, NewickTree
-using StatsBase, Distributions, Plots, StatsPlots, LaTeXStrings, Measures
+using StatsBase, Distributions
+using Plots, StatsPlots, LaTeXStrings
 using Serialization
+using SmoothTree: EPABCIS, ep!
 theme(:wong2)
 default(gridstyle=:dot, legend=false, framestyle=:box, title_loc=:left, titlefont=7)
 
-#trees = map(readdir("docs/data/yeast-rokas/yeast-rokas-mb/trees", join=true)) do f
-#    @info f
-#    ts = readnw.(readlines(f)[1001:end])
-#    ts = SmoothTree.rootall!(ts, "Calb")
-#    countmap(ts)
-#end
-#serialize("docs/data/yeast-rokas/mb.jls", trees)
-
-mbdata  = deserialize("docs/data/yeast-rokas/mb.jls")
-#ufbdata = deserialize("docs/data/yeast-rokas/ufboot.jls")
 mltrees = readnw.(readlines("docs/data/yeast-rokas/yeast.mltrees"))
-tmap  = clademap(mltrees[1])
-
-# we can compare using ML gene trees against acknowledging uncertainty
-data1 = Locus.(mbdata, Ref(tmap), 1e-6, -1.5)
-#data1 = Locus.(ufbdata, Ref(tmap), 1e-6, -1.5)
-data2 = Locus.(mltrees, Ref(tmap), 1e-6, -1.5)
+mbdata = deserialize("docs/data/yeast-rokas/mb.jls")
+spmap  = clademap(first(mbdata[1])[1])
+root   = rootclade(spmap)
+ntaxa  = cladesize(root)
 
 μ, V = log(2.), 5.
-root   = UInt16(sum(keys(tmap)))
-Sprior = NatMBM(CCD(unique(mltrees), tmap), BetaSplitTree(-1.5, cladesize(root)), 1.)
-θprior = BranchModel(root, gaussian_mom2nat([μ, V]), inftips=collect(keys(tmap)))
-model  = MSCModel(Sprior, θprior)
+Sprior = CCD(SplitCounts(root), BetaSplitTree(-1.5, ntaxa))
+ϕprior = BranchModel(root, gaussian_mom2nat([μ, V]))
+model  = MSCModel(Sprior, ϕprior)
 
-alg1   = EPABCIS(data1, model, 10000, target=200, miness=10., λ=0.1, α=1e-4, c=0.95)
-trace1 = ep!(alg1, 5)
-Z1     = first.(trace1[2])
+data1 = Locus.(mltrees, Ref(spmap), prior=BetaSplitTree(-1.5, ntaxa), α=1e-6)
+data2 = Locus.(mbdata,  Ref(spmap), prior=BetaSplitTree(-1.5, ntaxa), α=1e-6)
 
-alg2   = EPABCIS(data2, model, 10000, target=200, miness=10., λ=0.1, α=1e-4, c=0.95)
-trace2 = ep!(alg2, 5)
-Z2     = first.(trace2[2])
 
-# posterior inspection
-smple1 = relabel.(randtree(alg1.model.S, 10000), Ref(tmap)) |> ranking
-smple2 = relabel.(randtree(alg2.model.S, 10000), Ref(tmap)) |> ranking
+# A fixed topology
+# ================
+# The likely true tree:
+tree1 = nw"(Calb,(Sklu,(Scas,(Sbay,(Skud,(Smik,(Scer,Spar)))))));"
+tree2 = nw"(Calb,(Sklu,(Scas,((Sbay,Skud),(Smik,(Scer,Spar))))));"
+bs1 = SmoothTree.getbranches(tree1, spmap)
+bs2 = SmoothTree.getbranches(tree2, spmap)
 
-# now should estimate Z for both data sets with map topology of the other
-tree   = SmoothTree.getbranches(smple1[1][1], tmap)
-alg3   = EPABCIS(data2, tree, θprior, 10000, target=200, miness=10., λ=0.1, α=1e-4, c=0.95)
+mom  = MvNormal(fill(μ, length(bs1)), √V)
+prior = SmoothTree.tonatural(mom)
+
+alg3   = EPABCSIS(data1, bs1, prior, 10000, 5, target=1000, miness=10., λ=0.1, α=1e-4, c=0.95)
 trace3 = ep!(alg3, 5)
-Z3     = first.(trace3[2])
 
-# and the other way around
-tree   = SmoothTree.getbranches(smple2[1][1], tmap)
-alg4   = EPABCIS(data1, tree, θprior, 10000, target=200, miness=10., λ=0.1, α=1e-4, c=0.95)
+alg4   = EPABCSIS(data1, bs2, prior, 10000, 5, target=1000, miness=10., λ=0.1, α=1e-4, c=0.95)
 trace4 = ep!(alg4, 5)
-Z4     = first.(trace4[2])
 
-# posterior analysis
-algs   = [alg1, alg2, alg3, alg4]
-models = [alg1.model, alg2.model, 
-          MSCModel(alg1.model.S, alg3.model), 
-          MSCModel(alg2.model.S, alg4.model)]
-traces = [Z1, Z2, Z3, Z4]
-labels = ["CCD", "ML trees", "ML trees (S₁)", "CCD (S₂)"] 
+plot(getfield.(trace3, :ev), legend=:topleft)
+plot!(getfield.(trace4, :ev), legend=:topleft)
 
-# tree height
-function totallength(m, N=10000)
-    hs = map(1:N) do _
-        sum(last.(filter(x->isfinite(x[end]), randbranches(m))))
-    end
-    mean(hs), quantile(hs, [0.025, 0.975])
-end
 
-tl = map(totallength, models)
-# 4-element Vector{Tuple{Float64, Vector{Float64}}}:                            
-# (132.99138458652195, [48.48432912801099, 319.23620896133866])
-# (48.643028606774784, [18.733021202619106, 111.61887479218292])
-# (142.94215527088323, [42.527874213965546, 435.37909219648645])
-# (109.58827908634352, [44.11279716169171, 235.50613344857285])
+# Using ordinary importance sampling
+# ==================================
+alg1   = EPABCIS(data1, model, 50000, target=500, miness=10., λ=0.1, α=1e-4, c=0.95)
+trace1 = ep!(alg1, 5)
 
+alg2   = EPABCIS(data2, model, 50000, target=500, miness=10., λ=0.1, α=1e-4, c=0.95)
+trace2 = ep!(alg2, 5)
+
+smple1 = randtree(alg1.model.S, spmap, 10000) |> ranking
+smple2 = randtree(alg2.model.S, spmap, 10000) |> ranking
+
+tree   = SmoothTree.getbranches(smple2[1][1], spmap)
+alg3   = EPABCIS(data1, tree, θprior, 10000, target=200, miness=10., λ=0.1, α=1e-4, c=0.95)
+trace3 = ep!(alg3, 5)
+
+
+plot(getfield.(trace1, :ev), legend=:topleft)
+plot!(getfield.(trace2, :ev), legend=:topleft)
+
+using SmoothTree: relabel, maptree
+t1 = relabel(maptree(alg1.model), spmap)
+t2 = relabel(maptree(alg2.model), spmap)
+p1 = plot(t1, transform=true, scalebar=10.)
+p2 = plot(t2, transform=true, scalebar=10.)
+plot(p1, p2)
+    
+M  = alg.model
+bs = SmoothTree.getbranchapprox(M.ϕ, randsplits(M.S))
+ps = map(bs) do x
+    plot(Normal(μ, √V), fill=true, color=:lightgray)
+    plot!(x[end], color=:black)
+end |> xs->plot(xs...)
+
+
+# Unrooted
+# ========
+# we cannot easily identify the root from a collection of unrooted trees it
+# appears.
+data3 = Locus.(mbdata,  Ref(spmap), prior=BetaSplitTree(-1.5, ntaxa), α=1e-6, 
+               rooted=false)
+Sprior = CCD(SplitCounts(root), BetaSplitTree(-1.99, ntaxa))
+ϕprior = BranchModel(root, [0., -0.5])
+model  = MSCModel(Sprior, ϕprior)
+alg3   = EPABCIS(data3, model, 50000, target=200, miness=10., λ=0.1, α=1e-4, c=0.95)
+trace3 = ep!(alg3, 2)
+
+
+# SIS
+# ===
+using SmoothTree: EPABCSIS, maptree, relabel
+
+alg1b  = EPABCSIS(data1, model, 10000, 5, target=1000, miness=10., λ=0.1, α=1e-4, c=0.95)
+trace1 = ep!(alg1b, 5)
+smple1 = randtree(alg1b.model.S, spmap, 10000) |> ranking
+maptree1 = maptree(alg1b.model, spmap)
+
+alg2b  = EPABCSIS(data2, model, 10000, 5, target=1000, miness=10., λ=0.1, α=1e-4, c=0.95)
+trace2 = ep!(alg2b, 5)
+smple2 = randtree(alg2b.model.S, spmap, 10000) |> ranking
+maptree2 = maptree(alg2b.model, spmap)
+
+plot(getfield.(trace1, :ev), legend=:topleft)
+plot!(getfield.(trace2, :ev), legend=:topleft)
+
+plot(sort(alg1b.siteC), legend=:bottomright)
+plot!(sort(alg2b.siteC))
+
+t1 = smple2[1][1]
+tree   = SmoothTree.getbranches(t1, spmap)
+alg3   = EPABCSIS(data1, tree, ϕprior, 10000, 5, target=500, miness=10., λ=0.1, α=1e-4, c=0.95)
+trace3 = ep!(alg3, 5)
+maptree3 = SmoothTree.addmapbranches!(t1, spmap, alg3.model)
+
+t2 = smple1[1][1]
+tree   = SmoothTree.getbranches(t2, spmap)
+alg4   = EPABCSIS(data2, tree, ϕprior, 10000, 5, target=500, miness=10., λ=0.1, α=1e-4, c=0.95)
+trace4 = ep!(alg4, 5)
+maptree4 = SmoothTree.addmapbranches!(t2, spmap, alg4.model)
+
+# analyze posteriors
+algs = [alg2b, alg4, alg1b, alg3]
+labels = ["CCD", "CCD (tree 2)", "ML", "ML (tree 1)"]
+trees = [maptree2, maptree4, maptree1, maptree3] 
 
 species = Dict("Scas"=>"S. castellii", 
                "Smik"=>"S. mikatae", 
@@ -85,87 +135,54 @@ species = Dict("Scas"=>"S. castellii",
                "Sklu"=>"S. kluyveri", 
                "Scer"=>"S. cerivisiae", 
                "Calb"=>"C. albicans")
-spmap = Dict(v=>species[k] for (k,v) in tmap.m2)
 
-order = [1,2,4,3]
-ps = [plot(relabel(maptree(models[i]), spmap), transform=true, pad=1., fs=8, scalebar=10) for i=order]
-p0 = plot(ps..., layout=(1,4), size=(600,200))
+ps = [plot(relabel(trees[i], species), transform=true, pad=1.5, fs=8,
+           fontfamily="helvetica oblique", title=('A':'D')[i], scalebar=10) for i in 1:4]
+p0 = plot(ps..., layout=(1,4), size=(600,200), left_margin=3mm)
 
-p1 = plot(legend=:bottomright, xlim=(106,Inf), fg_legend=:transparent, ylabel=L"\hat{Z}", xlabel="iteration")
-p2 = plot(legend=:bottomright, fg_legend=:transparent, ylabel=L"C_i", xlabel="site")
-for i=order
-    plot!(p1, traces[i], label=labels[i], lw=1.5)
-    plot!(p2, sort(algs[i].siteC), lw=1.5, label=labels[i])
+# Plot the site marginals...
+p1 = plot(legend=:bottomright, ylabel=L"C_i", xlabel="site \$i\$", title="E",
+          fg_legend=:transparent)
+for (label, alg) in zip(labels,algs)
+    plot!(p1, sort(alg.siteC), lw=2, label=label)
 end
-plot(p1, p2)
-
-alg = algs[1]
-pps = SmoothTree.postpredsim(alg.model, data1, 1000)
-obs = proportionmap(mltrees)
-comp = [(haskey(obs, k) ? obs[k] : 0, v) for (k,v) in pps]
-comp = filter(x->x[1] > 0 || mean(x[2]) > 0.001, comp)
-pl3 = plot(ylabel=L"P", xlabel=L"G", xtickfont=7, xticks=0:2:20)
-for (i,x) in enumerate(sort(comp, rev=true))
-    plot!(pl3, [i, i], quantile(x[2], [0.025, 0.975]), color=:lightgray, lw=4)
-    scatter!(pl3, [(i, x[1])], color=:black)
+plot(p1)
+p2 = plot(xlabel="site \$i\$", title="F")
+o = sortperm(algs[1].siteC)
+marker = (markerstrokewidth=0.5, markersize=2.5)
+for i in [1,2]
+    scatter!(p2, algs[i].siteC[o], color=i, markerstrokecolor=i; marker...)
 end
-plot(pl3, size=(300,200), ylim=(0,1))
-
-#plot(pl1, pl3, layout=grid(1,2, widths=[0.7,0.3]), size=(700,220), bottom_margin=3mm)
-lay = @layout [grid(1,4, widths=[0.2,0.8/3,0.8/3,0.8/3]) ; grid(1,3)]
-p = plot(ps..., p1, p2, pl3, size=(720,450), layout=lay,
-         bottom_margin=3mm, guidefont=9)
-for (i,c) in enumerate('A':'G')
-    title!(p[i], "($c)") 
+plot(p2)
+p3 = plot(xlabel="site \$i\$", title="G")
+o = sortperm(algs[3].siteC)
+for i in [3,4]
+    scatter!(p3, algs[i].siteC[o], color=i, markerstrokecolor=i; marker...)
 end
-plot(p)
-
+plot(p3)
+p4 = plot(p1, p2, p3, layout=(1,3), size=(700,700/3√2), guidefont=8,
+          bottom_margin=3.5mm, left_margin=2mm)
+plot(p0, p4, layout=(2,1), size=(700, 2*700/3√2))
 savefig("docs/img/yeast-panel.pdf")
 
-# the posterior predictive distribution for gene trees differs strongly.
-# here we see that when we acknowledge gene tree uncertainty, we
-# estimate much less true discordance... posterior predictive
-# simulation suggest that almost 90% of the *true* gene trees matches
-# the species tree.
 
-# get proportionmap for full posterior over gene trees
-X = mbdata[1]
-for i=2:length(mbdata)
-    for (k,v) in mbdata[i]
-        !haskey(X, k) && (X[k] = 0)
-        X[k] += v
-    end
-end
-Z = sum(values(X))
-Y = Dict(k=>v/Z for (k,v) in X)
+M  = alg2b.model
+bs = SmoothTree.getbranchapprox(M.ϕ, randbranches(M))
 
-alg = algs[1]
-pps = SmoothTree.postpredsim(alg.model, data1, 1000)
-obs = proportionmap(trees)
-comp = [(haskey(obs, k) ? obs[k] : 0, v, (haskey(Y, k) ? Y[k] : 0)) for (k,v) in pps]
-comp = filter(x->x[1] > 0 || mean(x[2]) > 0.001, comp)
-pl3 = plot(ylabel=L"P", xlabel=L"G", xtickfont=7, xticks=0:2:20)
-for (i,x) in enumerate(sort(comp, rev=true))
-    plot!(pl3, [i, i], quantile(x[2], [0.025, 0.975]), color=:lightgray, lw=4)
-    scatter!(pl3, [(i, x[1])], color=:black)
-    scatter!(pl3, [(i, x[3])], color=:lightgray)
-end
-plot(pl3, size=(300,200), ylim=(0,1))
+bs = filter(x->!SmoothTree.isleafclade(x[2]), bs)
 
-ps = map([1,3]) do i
-    alg = algs[i]
-    bs = SmoothTree.getbranchapprox(alg.model, randsplits(alg.model.S))
-    bs = sort(filter(x->!SmoothTree.isleafclade(x[2]), bs))
-    p1 = map(bs) do (γ, δ, d)
-        plot(LogNormal(μ, √V), fill=true, color=:lightgray, fillalpha=0.3)
-        plot!(LogNormal(d.μ, d.σ), fill=true, fillalpha=0.3, color=:black, xlim=(0,100))
-    end |> x->plot(x..., size=(650,350))
-    title!(p1[1], labels[i])
-end
-pl2 = plot(ps..., layout=(2,1), size=(600,600/√2))
+ps = []
+for (i, (γ, δ, d)) in enumerate(bs)
+    p = plot(Normal(log(μ), √V), 
+             fill=true, color=:lightgray, fillalpha=0.5,
+             title=bitstring(δ), titlefont=6, xlim=(-2,8))
+             #xticks=i<8 ? false : :auto, 
+             #yticks=(i-1)%7 == 0 ? :auto : false)
+    vline!([d.μ], ls=:dot, color=:black)
+    plot!(d, color=:black, xlabel=i > 3 ? L"\log \phi" : "")
+    push!(ps, p)    
+end 
+plot(ps...)
+plot(ps..., size=(600, 2*600/3√2), bottom_margin=3mm)
 
-map(bs) do (γ, δ, d)
-    plot(Normal(μ, √V), fill=true, color=:lightgray, fillalpha=0.3)
-    plot!(Normal(d.μ, d.σ), fill=true, fillalpha=0.3, color=:black, xlim=(-4,4))
-end |> x->plot(x..., size=(650,350))
-
+savefig("docs/img/yeast-phi.pdf")

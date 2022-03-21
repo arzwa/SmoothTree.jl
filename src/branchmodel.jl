@@ -197,18 +197,19 @@ function logpdf(model::BranchModel, branches::Branches)
 end
 
 function getbranches(n::DefaultNode, m::AbstractDict{T}) where {T}
-    branches = Branches{T}()
-    _getbranches(branches, n, m)
-    return reverse(branches)  # return in preorder
+    nn = length(postwalk(n))-1
+    branches = Branches(undef, T, nn)
+    _getbranches(branches, n, m, 1)
+    return branches #reverse(branches)  # return in preorder
 end
 
-function _getbranches(branches, n, m)
-    isleaf(n) && return m[name(n)], distance(n)
-    a, da = _getbranches(branches, n[1], m)
-    b, db = _getbranches(branches, n[2], m)
-    push!(branches, (a + b, a, da))
-    push!(branches, (a + b, b, db))
-    return a + b, distance(n)
+function _getbranches(branches, n, m, i)
+    isleaf(n) && return m[name(n)], distance(n), i
+    a, da, j = _getbranches(branches, n[1], m, i+2)
+    b, db, j = _getbranches(branches, n[2], m, j)
+    branches[i] = (a + b, a, da)
+    branches[i+1] = (a + b, b, db)
+    return a + b, distance(n), j
 end
 
 function getbranchdict(n, m)

@@ -24,6 +24,14 @@ function relabel!(tree, m)
     return tree
 end
 
+# String -> String relabeling happens at name level
+function relabel!(tree, m::Dict{String,String})
+    for n in getleaves(tree)
+        n.data.name = m[name(n)]
+    end
+    return tree
+end
+
 # root all trees identically
 function rootall(trees)
     tree = first(trees)

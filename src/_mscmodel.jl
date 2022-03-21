@@ -197,7 +197,7 @@ function traceback(trace::Vector{<:MSCModel})
     return (θ=strace, μ=first.(X), V=last.(X))
 end
 
-# assumes the MAP tree is represented (otherwise notw ell defined anyhow...) 
+# assumes the MAP tree is represented (otherwise not well defined anyhow...) 
 function maptree(model::MSCModel{T}) where T
     _maptree(Node(model.S.root), model.S.root, model.S, model.q)
 end

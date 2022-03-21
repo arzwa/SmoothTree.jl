@@ -118,7 +118,7 @@ data   = SmoothTree.Locus.(Y, Ref(m), prior=bsd, α=1e-9)
 model  = MSCModel(Sprior, θprior)
 #alg    = SmoothTree.EPABCIS(data, model, 10000, target=1000, miness=10.)
 alg    = SmoothTree.EPABCSIS(data, model, 10000, 5, target=1000, miness=10., prunetol=0.)
-trace  = ep!(alg, 5);
+trace  = ep!(alg, 10);
 post   = alg.model
 
 randtree(alg.model.S, m, 10000) |> ranking
@@ -167,26 +167,17 @@ p2 = vec(sum(ps, dims=2)) ./ (x[2] - x[1])
 pl2 = plot(prior, fill=true, color=:lightgray, legend=true, label=L"p(\phi)",
            alpha=0.5, xlim=(-2,2), xlabel=L"\phi", ylabel="density", yguidefont=8,
            size=(350,270), fg_legend=:transparent, title="(B)")
-plot!(x, p1, fill=true, color=:gray, fillalpha=0.5, linealpha=0., label=L"p(\phi|X)")
+plot!(x, p1, fill=true, color=:gray, fillalpha=0.5, linealpha=0., label=L"p(\phi|y)")
 plot!(y, p2, fill=true, color=:gray, fillalpha=0.5, linealpha=0., label="")
 vline!(θ, color=:black, ls=:dot, label="")
 plot!(d1, color=:black, label=L"q(\phi)")
 plot!(d2, color=:black, label="")
 
+pl3 = plot(getfield.(trace, :ev), ylabel=L"\hat{Z}_n", xlabel=L"n", title="(C)")
 
-# 3. posterior prediction plot
-pps = SmoothTree.postpredsim(post, data, 1000)
-obs = proportionmap(Y)
-comp = [(haskey(obs, k) ? obs[k] : 0, v) for (k,v) in pps]
+plot(pl1, pl2, pl3, layout=(1,3), size=(700,900/3√2), bottom_margin=5mm, left_margin=3mm)
+#savefig("docs/img/fourtaxon-sim.pdf")
 
-pl3 = plot(xticks=1:2:15, ylabel=L"P", xlabel=L"G", title="(C)", xtickfont=7)
-for (i,x) in enumerate(sort(comp, rev=true))
-    plot!(pl3, [i, i], quantile(x[2], [0.025, 0.975]), color=:lightgray, lw=3)
-    scatter!(pl3, [(i, x[1])], color=:black)
-end
-w = 800; h = 0.3w; w1=0.28; w2=(1-w1)/2
-plot(pl1, pl2, pl3, size=(w,h), bottom_margin=5mm, left_margin=3mm,
-     dpi=300, layout=grid(1,3, widths=[w1,w2,w2]))
 
 
 # 4. trace plots

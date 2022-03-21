@@ -58,8 +58,27 @@ const Splits{T} = Vector{Tuple{T,T}}
 
 A vector representation of a phylogenetic tree (with `Float64` branch lengths).
 """
-const Branches{T} = Vector{Tuple{T,T,Float64}}
+#const Branches{T} = Vector{Tuple{T,T,Float64}}
+struct Branches{T,V}
+    splits::Splits{T}
+    xs::Vector{V}
+end
 
+# undef initializer
+function Branches(_::UndefInitializer, T, n) 
+    Branches(Splits{T}(undef, n), Vector{Float64}(undef, n))
+end
+
+Base.length(b::Branches) = length(b.xs)
+Base.iterate(b::Branches) = ((b.splits[1]..., b.xs[1]), 1)
+Base.iterate(b::Branches, i) = i >= length(b) ? nothing : ((b.splits[i+1]..., b.xs[i+1]), i+1)
+Base.getindex(b::Branches, i) = (b.splits[i]..., b.xs[i])
+Base.copy(b::Branches) = Branches(copy(b.splits), copy(b.xs))
+
+function Base.setindex!(b::Branches, v, i)
+    b.splits[i] = (v[1], v[2])
+    b.xs[i] = v[3]
+end
 
 # Split distributions
 # ===================
@@ -420,7 +439,7 @@ function update!(d, γ, δ::T, w::V) where {T,V}
     end
 end
 
-function SplitCounts(xs::Vector{Branches{T}}, ws::Vector{V}) where {T,V}
+function SplitCounts(xs::Vector{Branches{T,V}}, ws::Vector{V}) where {T,V}
     d = SplitDict{T,V}()
     for (x, w) in zip(xs, ws)
         add_splits!(d, x, w)
@@ -429,8 +448,7 @@ function SplitCounts(xs::Vector{Branches{T}}, ws::Vector{V}) where {T,V}
 end
 
 function add_splits!(d, x::Branches, w)
-    for i=length(x):-2:1
-        γ, δ, _ = x[i]
+    for (γ, δ, _) in x
         δ = min(δ, γ-δ)
         update!(d, γ, δ, w)
     end
@@ -635,7 +653,7 @@ function reftree(x::T) where T
 end
 
 # this one uses `maxsplit` recursively, but for our current definition of
-# maxsplit, the above is more elegant
+# maxsplit, the above is more elegant and efficient
 #function reftree2(x::T) where T
 #    splits = Tuple{T,T}[]
 #    function walk(x)

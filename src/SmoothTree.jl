@@ -1,7 +1,7 @@
 module SmoothTree
 
 using NewickTree, StatsBase, Parameters, Random, StatsFuns, Distributions
-using Printf, ProgressBars, SpecialFunctions, ThreadTools, LinearAlgebra
+using Printf, ProgressBars, SpecialFunctions, LinearAlgebra
 import Distributions: logpdf
 
 export clademap, rootall!, rootclade, cladesize, ranking
@@ -10,13 +10,8 @@ export BetaSplitTree
 export CCD, randsplits, randtree, randbranches
 export BranchModel, MSCModel
 export Locus
-export EPABCIS, ep!
+export EPABCIS, EPABCSIS, ep!
 export gaussian_mom2nat
-#export CCD, MSC, Locus, randtree, randsplits, randbranches, traceback
-#export setdistance!, setdistance_internal!, maptree
-#export NatMBM, MomMBM, MSCModel, BranchModel, ep!, pep!, EPABC, EPABCIS
-#export ranking, clademap, BetaSplitTree, cladesize, splitsize, rootclade
-#export relabel, gaussian_mom2nat, topologize
 
 include("bimap.jl")
 include("utils.jl")
@@ -25,8 +20,8 @@ include("ccd.jl")
 include("algebra.jl")
 include("msc.jl")
 include("branchmodel.jl")
-include("mvgaussian.jl")
 include("mscmodel.jl")
+include("mvgaussian.jl")
 include("locus.jl")
 include("epabc.jl")
 #include("pps.jl")
