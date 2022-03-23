@@ -46,6 +46,12 @@ function splitcherry(γ)
     return c1, γ-c1
 end
 
+
+# Splits
+# ======
+# Splits is just a type alias for a vector of tuples.
+const DefaultNode{T} = Node{T,NewickData{Float64,String}}
+
 """
     Splits{T}
 
@@ -53,12 +59,31 @@ A collection of splits, i.e. tuples `(γ, δ)`, so that `δ ⊂ γ` and `δ < γ
 """
 const Splits{T} = Vector{Tuple{T,T}}
 
+function getsplits(n::DefaultNode, m::AbstractDict{T,V}) where {T,V}
+    splits = Splits{T}()
+    _getsplits(splits, n, m)
+    return splits
+end
+
+function _getsplits(splits, n, m)
+    isleaf(n) && return m[name(n)]
+    a = _getsplits(splits, n[1], m)
+    b = _getsplits(splits, n[2], m)
+    push!(splits, (a + b, min(a,b)))
+    return a + b
+end
+
+# Branches
+# ========
+# This is a useful alternative representation of a tree object, although I am
+# not entirely sure anymore whether it has benefits over a usual recursive tree
+# object defined in terms of `NewickTree.Node`.
+
 """
     Branches{T}
 
 A vector representation of a phylogenetic tree (with `Float64` branch lengths).
 """
-#const Branches{T} = Vector{Tuple{T,T,Float64}}
 struct Branches{T,V}
     splits::Splits{T}
     xs::Vector{V}
@@ -79,6 +104,32 @@ function Base.setindex!(b::Branches, v, i)
     b.splits[i] = (v[1], v[2])
     b.xs[i] = v[3]
 end
+
+"""
+    getbranches(n::Node, m::AbstractDict)
+    
+Get `Branches` struct from a `NewickTree` tree (`Node`). Note that we assume
+the branches are on a rate (ℝ⁺) scale (we log-transform them). The branches
+will be pre-ordered.
+"""
+function getbranches(n::DefaultNode, m::AbstractDict{T}) where {T}
+    nn = length(postwalk(n))-1
+    branches = Branches(undef, T, nn)
+    _getbranches(branches, n, m, 1)
+    return branches 
+end
+
+function _getbranches(branches, n, m, i)
+    isleaf(n) && return m[name(n)], distance(n), i
+    a, da, j = _getbranches(branches, n[1], m, i+2)
+    b, db, j = _getbranches(branches, n[2], m, j)
+    branches[i] = (a + b, a, log(da))
+    branches[i+1] = (a + b, b, log(db))
+    return a + b, distance(n), j
+end
+
+branchdict(b::Branches) = Dict((x1,x2)=>x3 for (x1,x2,x3) in b)
+
 
 # Split distributions
 # ===================
@@ -173,6 +224,13 @@ end
 Base.getindex(x::MBMSplits, δ) = haskey(x, δ) ? 
     x.splits[δ] : x.η0[splitsize(x.parent, δ)]
 
+"""
+    prune!(x::MBMSplits, atol)
+
+Prune a split distribution with MBM prior. If the probability of a represented
+split is within `atol` of an unrepresented one of the same size, remove it from 
+the explicitly represented splits.
+"""
 function prune!(x::MBMSplits, atol)
     for (δ, v) in x
         s = splitsize(x.parent, δ)
@@ -197,7 +255,7 @@ function NatBetaSplits(γ::T, d, bsd::BetaSplitTree{V}, α) where {T,V}
     s  = cladesize(γ) 
     ns = nsplits.(s, 1:s÷2) 
     as = α .* bsd.q[s-2]
-    aρ = as[splitsize(γ, ρ)]
+    aρ = as[splitsize(γ, ρ)]  # pseudocount for the reference/max split
     pρ = haskey(d, ρ) ? log(aρ + d[ρ]) : log(aρ)  # unnormalized pr of split ρ
     η0 = log.(as) .- pρ 
     dd = Dict{T,V}()
@@ -549,9 +607,6 @@ function _randwalk!(rng::AbstractRNG, splits, clade, ccd)
     splits = _randwalk!(rng, splits, rght, ccd)
     return splits
 end
-
-# obtain a tree from a split set
-const DefaultNode{T} = Node{T,NewickData{Float64,String}}
 
 randtree(ccd::CCD, lmap) = randtree(Random.default_rng(), ccd, lmap)
 randtree(ccd::CCD, lmap, n) = randtree(Random.default_rng(), ccd, lmap, n)

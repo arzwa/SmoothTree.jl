@@ -34,7 +34,8 @@ function logpartition(m::NaturalMvNormal)
 end
 
 # not nice, should put a wrapper around NaturalMvNormal
-logpdf(m::MvNormal, b::Branches) = logpdf(m, log.(b.xs))
+# XXX note that the branches have distances on log-scale.
+logpdf(m::MvNormal, b::Branches) = logpdf(m, b.xs)
 
 
 # Now define what we need to do EP using the same methods as for the CCD
@@ -54,7 +55,7 @@ end
 # this is pretty straightforward now that we separated the splits from the
 # distances in the `Branches` struct.
 function simfun!(p, model::MvNormal)
-    p.S = Branches(p.S.splits, exp.(rand(model)))
+    p.S = Branches(p.S.splits, rand(model))
     p.w = logpdf(model, p.S)
 end
 
@@ -89,13 +90,13 @@ function sub!(x::NaturalMvNormal, y::NaturalMvNormal)
 end
 
 # 3. Match moments
+# `xs` are assumed to be on log-scale
 function matchmoments_mvn(xs, ws)
     n = length(first(xs))
     μ = zeros(n)
     S = zeros(n,n)
     W = 0.
-    for (ex, w) in zip(xs, ws)
-        x = log.(ex)
+    for (x, w) in zip(xs, ws)
         μ .+= w .* x
         S .+= w .* x*x'
         W += w

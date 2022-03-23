@@ -1,8 +1,7 @@
 """
     BiMap{T,V}
 
-Bijective map for distinct types, so that `getindex` dispatches on
-type.
+Bijective map for distinct types, so that `getindex` dispatches on type.
 """
 struct BiMap{T,V} <: AbstractDict{T,V}
     m1::Dict{T,V}

@@ -80,8 +80,9 @@ function randsplits(branches::Branches{T}, init::V) where {T,V}
         # in a tip branch... because _censoredcoalsplits modifies l1, l2...
         l1 = isleafclade(δ1) ? copy(init[δ1]) : inner[δ1]
         l2 = isleafclade(δ2) ? copy(init[δ2]) : inner[δ2]
-        left, splits = _censoredcoalsplits!(splits, θ1, l1)
-        rght, splits = _censoredcoalsplits!(splits, θ2, l2)
+        # XXX this is the only place where we need branch lengths on rate scale
+        left, splits = _censoredcoalsplits!(splits, exp(θ1), l1)
+        rght, splits = _censoredcoalsplits!(splits, exp(θ2), l2)
         inner[γ] = vcat(left, rght)
     end
     _, splits = _censoredcoalsplits!(splits, Inf, inner[root])
@@ -125,22 +126,6 @@ function getbranchapprox(ϕ, splits::Branches)
         μ, V = gaussian_nat2mom(ϕ[(γ, δ)])
         (γ, δ, Normal(μ, √V))
     end
-end
-
-"""
-    traceback(trace::Vector{<:MSCModel})
-
-Trace back the history of the approximation.
-"""
-function traceback(trace::Vector{<:MSCModel})
-    ss = allsplits(trace[end].S)
-    bs = allbranches(trace[end].S)
-    Ms = MomMBM.(getfield.(trace, :S))
-    ϕs = getfield.(trace, :ϕ)
-    strace = mapreduce(x->[x[γ,δ] for (γ,δ) in ss], hcat, Ms) |> permutedims
-    btrace = mapreduce(x->[x[γ,δ] for (γ,δ) in bs], hcat, ϕs) |> permutedims
-    X = gaussian_nat2mom.(btrace)
-    return (θ=strace, μ=first.(X), V=last.(X))
 end
 
 # assumes the MAP tree is represented (otherwise not well defined anyhow...) 

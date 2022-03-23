@@ -5,7 +5,7 @@ using Plots, StatsPlots, Measures, LaTeXStrings
 default(gridstyle=:dot, legend=false, title_loc=:left, titlefont=8, framestyle=:box)
 
 # The species tree topology we will use:
-species = string.('A':'Z')[1:10]
+species = string.('A':'Z')[1:6]
 spmap = clademap(species)
 root = rootclade(spmap)
 ntaxa = length(spmap)
@@ -41,16 +41,14 @@ data = Locus.(G, Ref(spmap), prior=BetaSplitTree(-1., ntaxa), α=1e-4)
 bs = SmoothTree.getbranches(S, spmap)
 prior = SmoothTree.tonatural(MvNormal(fill(log(μ), length(bs)), √V))
 
-alg = SmoothTree.EPABCSIS(data, bs, prior, 50000, 3, target=1000, 
-                          miness=20., α=1e-4, c=0.95)
+alg = SmoothTree.EPABCSIS(data, bs, prior, 10000, 3, target=1000, miness=10., c=0.95)
 trace = ep!(alg, 3)
-
 post = SmoothTree.tomoment(alg.model)
 
-scatter(bs.xs, exp.(post.μ), yerror=2sqrt.(diag(post.Σ)))
+scatter(bs.xs, post.μ, yerror=2sqrt.(diag(post.Σ)))
 plot!(x->x)
-hline!([μ])
 
+diag(post.Σ)
 
 # use a Beta-splitting prior
 #Sprior = CCD(SplitCounts(unique(G), spmap), BetaSplitTree(-1., ntaxa), 50.)

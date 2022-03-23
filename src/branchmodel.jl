@@ -91,7 +91,7 @@ gaussian_mom2nat(θ::Vector) = [θ[1]/θ[2], -1.0/(2θ[2])]
 # a random branch length from the model
 function randbranch(ϕ::BranchModel, γ, δ) 
     δ ∈ ϕ.inftips && return Inf
-    return exp(randgaussian_nat(ϕ[(γ, δ)]))
+    return randgaussian_nat(ϕ[(γ, δ)])
 end
 
 # draw a random Gaussian number from natural parameterization
@@ -125,13 +125,13 @@ end
 # branch parameters
 function addtree!(d, b::Branches, w)
     for (γ, δ, x) in b
+        # XXX note that x is on log-scale
         !isfinite(x) && continue
-        lx = log(x)  # input is on ℝ⁺
         branch = (γ, δ)
         !haskey(d, branch) && (d[branch] = zeros(3))
         d[branch][1] += w
-        d[branch][2] += w*lx
-        d[branch][3] += w*lx^2
+        d[branch][2] += w*x
+        d[branch][3] += w*x^2
     end
 end
 
@@ -175,13 +175,15 @@ end
 
 """
     logpdf(m::BranchModel, clade, subclade, length)
+
+Note that `length` is assumed to be on log-scale!
 """
 function logpdf(m::BranchModel, γ, δ, d)
     μ, V = gaussian_nat2mom(m[(γ, δ)])
     if isnan(V)  
         μ, V = gaussian_nat2mom(m.η0)
     end
-    return logpdf(Normal(μ, √V), log(d))
+    return logpdf(Normal(μ, √V), d)
 end
 
 """
@@ -194,25 +196,5 @@ function logpdf(model::BranchModel, branches::Branches)
         isfinite(d) && (l += logpdf(model, γ, δ, d))
     end
     return l
-end
-
-function getbranches(n::DefaultNode, m::AbstractDict{T}) where {T}
-    nn = length(postwalk(n))-1
-    branches = Branches(undef, T, nn)
-    _getbranches(branches, n, m, 1)
-    return branches #reverse(branches)  # return in preorder
-end
-
-function _getbranches(branches, n, m, i)
-    isleaf(n) && return m[name(n)], distance(n), i
-    a, da, j = _getbranches(branches, n[1], m, i+2)
-    b, db, j = _getbranches(branches, n[2], m, j)
-    branches[i] = (a + b, a, da)
-    branches[i+1] = (a + b, b, db)
-    return a + b, distance(n), j
-end
-
-function getbranchdict(n, m)
-    Dict((x[1],x[2])=>x[3] for x in getbranches(n, m))
 end
 
