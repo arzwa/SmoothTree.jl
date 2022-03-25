@@ -14,6 +14,7 @@ Base.length(x::Locus) = length(x.lmap)
 Base.show(io::IO, x::Locus{D}) where D = write(io, "Locus $((length(x), D))")
 randtree(locus::Locus) = randtree(locus.data, locus.lmap)
 randtree(locus::Locus, n) = randtree(locus.data, locus.lmap, n)
+maptree(locus::Locus) = maptree(locus.data, locus.lmap)
 
 """
     Locus(trees, spmap)

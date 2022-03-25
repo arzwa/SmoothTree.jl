@@ -14,6 +14,7 @@ S = randtree(CCD(SplitCounts(root), BetaSplitTree(-1., ntaxa)), spmap)
 # We set some random branch lengths
 l = SmoothTree.n_internal(S)
 d = MixtureModel([LogNormal(log(0.5), 0.5), LogNormal(log(3.), .5)], [0.2,0.8])
+#d = MixtureModel([Normal(log(0.5), 0.5), Normal(log(3.), .5)], [0.2,0.8])
 #d = Gamma(3., 1/2)
 θ = rand(d, l)
 SmoothTree.setdistance_internal!(S, θ)

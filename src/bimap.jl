@@ -45,3 +45,8 @@ end
 function getclade(m::BiMap{T,String}, clade::Vector{String}) where T  
     return T(sum([m[x] for x in clade]))
 end
+
+function getclade(m::BiMap{T,String}, clade::T) where T
+    leaves = digits(clade, base=2)
+    [m[T(2^(i-1))] for i=1:length(leaves) if leaves[i] == 1]
+end

@@ -33,15 +33,31 @@ bs2 = SmoothTree.getbranches(tree2, spmap)
 mom  = MvNormal(fill(μ, length(bs1)), √V)
 prior = SmoothTree.tonatural(mom)
 
-alg3   = EPABCSIS(data1, bs1, prior, 10000, 5, target=1000, miness=10., λ=0.1, α=1e-4, c=0.95)
-trace3 = ep!(alg3, 5)
+alg2f  = EPABCSIS(data2, bs1, prior, 10000, 5, target=1000, miness=10., λ=0.1, α=1e-4, c=0.95)
+trace2f = ep!(alg2f, 5)
 
-alg4   = EPABCSIS(data1, bs2, prior, 10000, 5, target=1000, miness=10., λ=0.1, α=1e-4, c=0.95)
-trace4 = ep!(alg4, 5)
+#alg4f  = EPABCSIS(data2, bs2, prior, 10000, 5, target=1000, miness=10., λ=0.1, α=1e-4, c=0.95)
+#trace4 = ep!(alg4, 5)
 
 plot(getfield.(trace3, :ev), legend=:topleft)
 plot!(getfield.(trace4, :ev), legend=:topleft)
 
+M = SmoothTree.tomoment(alg2f.model)
+
+ps = []
+for i in 1:length(bs1)
+    a, b, d = bs1[i]
+    SmoothTree.isleafclade(b) && continue
+    m, s = SmoothTree.gaussian_nat2mom(alg2b.model.ϕ[(a,b)])
+    p = plot(Normal(m, √s))
+    plot!(Normal(M.μ[i], √M.Σ[i,i]))
+    push!(ps, p)
+end
+plot(ps...)
+
+idx = filter(i->!SmoothTree.isleafclade(bs1[i][2]), 1:length(bs1))
+
+heatmap(M.Σ[idx,idx])
 
 # Using ordinary importance sampling
 # ==================================
@@ -104,9 +120,6 @@ trace2 = ep!(alg2b, 5)
 smple2 = randtree(alg2b.model.S, spmap, 10000) |> ranking
 maptree2 = maptree(alg2b.model, spmap)
 
-plot(getfield.(trace1, :ev), legend=:topleft)
-plot!(getfield.(trace2, :ev), legend=:topleft)
-
 plot(sort(alg1b.siteC), legend=:bottomright)
 plot!(sort(alg2b.siteC))
 
@@ -122,10 +135,28 @@ alg4   = EPABCSIS(data2, tree, ϕprior, 10000, 5, target=500, miness=10., λ=0.1
 trace4 = ep!(alg4, 5)
 maptree4 = SmoothTree.addmapbranches!(t2, spmap, alg4.model)
 
+plot(getfield.(trace1, :ev), legend=:topleft)
+plot!(getfield.(trace2, :ev), legend=:topleft)
+plot!(getfield.(trace3, :ev), legend=:topleft)
+plot!(getfield.(trace4, :ev), legend=:topleft)
+
+
 # analyze posteriors
 algs = [alg2b, alg4, alg1b, alg3]
 labels = ["CCD", "CCD (tree 2)", "ML", "ML (tree 1)"]
 trees = [maptree2, maptree4, maptree1, maptree3] 
+
+function totallength(m, N=10000)
+    hs = map(1:N) do _
+        bs = randbranches(m)
+        xs = [d for (a, b, d) in bs if !SmoothTree.isleafclade(b)]
+        sum(exp.(xs))
+    end
+    mean(hs), quantile(hs, [0.025, 0.975])
+end
+
+totallength(alg2b.model)
+totallength(alg1b.model)
 
 species = Dict("Scas"=>"S. castellii", 
                "Smik"=>"S. mikatae", 
@@ -163,26 +194,67 @@ plot(p3)
 p4 = plot(p1, p2, p3, layout=(1,3), size=(700,700/3√2), guidefont=8,
           bottom_margin=3.5mm, left_margin=2mm)
 plot(p0, p4, layout=(2,1), size=(700, 2*700/3√2))
-savefig("docs/img/yeast-panel.pdf")
+#savefig("docs/img/yeast-panel.pdf")
 
 
+# Full MvNormal analysis for a fixed tree
+tree1 = nw"(Calb,(Sklu,(Scas,(Sbay,(Skud,(Smik,(Scer,Spar)))))));"
+bs1 = SmoothTree.getbranches(tree1, spmap)
+mom  = MvNormal(fill(μ, length(bs1)), √V)
+prior = SmoothTree.tonatural(mom)
+alg2f  = EPABCSIS(data2, bs1, prior, 10000, 5, target=1000, miness=10., λ=0.1, α=1e-4, c=0.95)
+trace2f = ep!(alg2f, 5)
+
+F  = SmoothTree.tomoment(alg2f.model)
 M  = alg2b.model
-bs = SmoothTree.getbranchapprox(M.ϕ, randbranches(M))
-
-bs = filter(x->!SmoothTree.isleafclade(x[2]), bs)
 
 ps = []
-for (i, (γ, δ, d)) in enumerate(bs)
+for (i, (γ, δ, d)) in enumerate(bs1)
+    SmoothTree.isleafclade(δ) && continue
+    m, s = SmoothTree.gaussian_nat2mom(alg2b.model.ϕ[(γ,δ)])
     p = plot(Normal(log(μ), √V), 
              fill=true, color=:lightgray, fillalpha=0.5,
              title=bitstring(δ), titlefont=6, xlim=(-2,8))
              #xticks=i<8 ? false : :auto, 
              #yticks=(i-1)%7 == 0 ? :auto : false)
-    vline!([d.μ], ls=:dot, color=:black)
-    plot!(d, color=:black, xlabel=i > 3 ? L"\log \phi" : "")
+    vline!([m], ls=:dot, color=:black)
+    plot!(Normal(m, √s), color=:black, xlabel=i > 3 ? L"\log \phi" : "")
+    plot!(Normal(F.μ[i], √F.Σ[i,i]))
     push!(ps, p)    
 end 
-plot(ps...)
 plot(ps..., size=(600, 2*600/3√2), bottom_margin=3mm)
 
 savefig("docs/img/yeast-phi.pdf")
+
+
+# gene investigation
+o = sortperm(alg2b.siteC)
+scatter(alg2b.siteC[o])
+
+ps = []
+for index in o[1:6]
+    Z = round(alg2b.siteC[index], digits=1)
+    locus = data2[index]
+    mtree = maptree(locus)
+    splts = SmoothTree.getsplits(mtree, locus.lmap)
+    l = round(exp(logpdf(locus.data, splts)), digits=2)
+    p = plot(relabel(mtree, species), title="C = $Z, p = $l", transform=true,
+             fontfamily="helvetica oblique", titlefontsize=9)
+    push!(ps, p)
+end
+plot(ps...)
+
+# should plot these with clade credibilities and molecular branch lengths...
+
+
+fs = readdir("docs/data/yeast-rokas/yeast-rokas-mb/trees", join=true)
+fs[o[1:6]]
+# "docs/data/yeast-rokas/yeast-rokas-mb/trees/92.fasta.nexus.treesample"
+# "docs/data/yeast-rokas/yeast-rokas-mb/trees/40.fasta.nexus.treesample"
+# "docs/data/yeast-rokas/yeast-rokas-mb/trees/46.fasta.nexus.treesample"
+# "docs/data/yeast-rokas/yeast-rokas-mb/trees/60.fasta.nexus.treesample"
+# "docs/data/yeast-rokas/yeast-rokas-mb/trees/25.fasta.nexus.treesample"
+# "docs/data/yeast-rokas/yeast-rokas-mb/trees/20.fasta.nexus.treesample"
+
+
+

@@ -723,3 +723,22 @@ end
 #    return splits
 #end
 
+function maptree(x::CCD, spmap)
+    splits = mapsplits(x)
+    gettree_addcherry(splits, spmap) 
+end
+
+mapsplits(x::CCD{T}) where T = _mapsplits!(Splits{T}(), x, x.root)
+
+function _mapsplits!(splits, x, γ)
+    (isleafclade(γ) || ischerry(γ)) && return
+    δ = first(argmax(last, x[γ].splits))
+    push!(splits, (γ, δ))
+    _mapsplits!(splits, x, δ)
+    _mapsplits!(splits, x, γ-δ)
+    return splits
+end
+
+
+
+
