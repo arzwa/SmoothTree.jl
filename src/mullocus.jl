@@ -37,7 +37,7 @@ end
 function randinit(l::MulLocus{D,T}) where {D,T}
     d = Dict{T,Vector{T}}()
     genes = Dict(k=>shuffle(v) for (k,v) in l.sp2gene)
-    sgs = shuffle(collect(keys(l.sg2sp)))
+    sgs = shuffle!(collect(keys(l.sg2sp)))
     for k in sgs
         v = l.sg2sp[k]
         d[k] = isempty(genes[v]) ? T[] : [pop!(genes[v])]
