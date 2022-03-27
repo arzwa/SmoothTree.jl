@@ -25,7 +25,7 @@ function relabel!(tree, m)
 end
 
 # String -> String relabeling happens at name level
-function relabel!(tree, m::Dict{String,String})
+function relabel!(tree, m::Dict{T,T}) where T<:AbstractString
     for n in getleaves(tree)
         n.data.name = m[name(n)]
     end

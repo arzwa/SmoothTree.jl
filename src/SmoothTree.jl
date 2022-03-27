@@ -12,7 +12,7 @@ export BranchModel, MSCModel
 export Locus
 export EPABCIS, EPABCSIS, ep!
 export gaussian_mom2nat
-export maptree
+export maptree, relabel
 
 include("bimap.jl")
 include("utils.jl")
@@ -24,6 +24,7 @@ include("branchmodel.jl")
 include("mscmodel.jl")
 include("mvgaussian.jl")
 include("locus.jl")
+include("mullocus.jl")
 include("epabc.jl")
 #include("pps.jl")
 

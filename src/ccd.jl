@@ -723,9 +723,33 @@ end
 #    return splits
 #end
 
+# should have ccps as support values?
 function maptree(x::CCD, spmap)
-    splits = mapsplits(x)
-    gettree_addcherry(splits, spmap) 
+    n = Node(x.root)
+    _maptree(x, x.root, n, spmap)
+end
+
+function _maptree(x::CCD, γ, n, spmap)
+    if isleafclade(γ)
+        n.data.name = spmap[γ]
+        return n
+    elseif ischerry(γ)
+        c1, c2 = splitcherry(γ)
+        push!(n, Node(c1, n=spmap[c1]))
+        push!(n, Node(c2, n=spmap[c2]))
+        return n
+    else
+        δ = first(argmax(last, x[γ].splits))
+        s = exp(logpdf(x, γ, δ))
+        n.data.name = string(round(Int, s*100))
+        n.data.support = s
+        c1 = Node(δ)
+        c2 = Node(γ-δ)
+        push!(n, c1, c2)
+        _maptree(x, δ, c1, spmap)
+        _maptree(x, γ-δ, c2, spmap)
+        return n
+    end 
 end
 
 mapsplits(x::CCD{T}) where T = _mapsplits!(Splits{T}(), x, x.root)

@@ -199,7 +199,7 @@ end
 
 function data_likelihood!(w, data, sims)
     Threads.@threads for j=1:length(w)
-        G = randsplits(sims[j].S, data.init)  # coalescent sim
+        G = randsplits(sims[j].S, getinit(data))  # coalescent sim
         w[j] += logpdf(data.data, G)  # kernel
     end
 end
