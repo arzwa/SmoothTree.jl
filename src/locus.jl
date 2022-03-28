@@ -61,7 +61,7 @@ function read_trprobs(fname; outgroup=nothing)
     ls = strip.(readlines(fname))
     start = findfirst(x->x=="translate", ls) + 1
     stop  = findfirst(x->startswith(x, "tree"), ls) - 1
-    names = Dict(Pair(split(strip(y, [',']))...) for y in ls[start:stop])
+    names = Dict(Pair(split(strip(y, [',',';']))...) for y in ls[start:stop])
     stop2 = findlast(x->startswith(x, "tree"), ls)
     map(stop+1:stop2) do i
         ws, ts = split(ls[i])[end-1:end]
