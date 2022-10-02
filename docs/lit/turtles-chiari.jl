@@ -85,9 +85,9 @@ alg = EPABCSIS(data, model, 10000, 5, target=1000, miness=10., λ=0.1, α=1e-4, 
 trace1 = ep!(alg, 2)
 
 #alg1 = deserialize("docs/data/turtles/chiari-alg1-10passes.jls")
-alg2 = deserialize("docs/data/turtles/chiari-alg1-10passes-2.jls")
+alg2 = deserialize("docs/data/turtles/chiari-alg1/chiari-alg1-10passes-2.jls")
 #alg3 = deserialize("docs/data/turtles/chiari-alg1-10passes-3.jls")
-alg4 = deserialize("docs/data/turtles/chiari-alg1-10passes-4.jls")
+alg4 = deserialize("docs/data/turtles/chiari-alg1/chiari-alg1-10passes-4.jls")
 
 species = Dict("emys_orbicularis"=>"Emys",
                "phrynops"=>"Phrynops",
@@ -104,18 +104,19 @@ M2 = alg4.model
 bs = SmoothTree.getbranchapprox(M1.ϕ, randbranches(M1))
 bs = filter(x->!SmoothTree.isleafclade(x[2]), bs)
 xs = map(bs) do (γ, δ, d)
-    plot(Normal(log(μ), √V), fill=true, color=:lightgray, fillalpha=0.5)
-    plot!(d, color=:black)
+    plot(Normal(log(μ), √V), fill=true, color=:lightgray, fillalpha=0.5, tickfont=7)
+    plot!(d, color=:black, fill=true, fillalpha=0.2)
     m, s = SmoothTree.gaussian_nat2mom(M2.ϕ[(γ,δ)])
-    plot!(Normal(m, √s), title=bitstring(δ))
+    plot!(Normal(m, √s), title=bitstring(δ), titlefont=7, fill=true, fillalpha=0.3)
     #plot(LogNormal(log(μ), √V), fill=true, color=:lightgray, xlim=(0,10))
     #plot!(LogNormal(d.μ, d.σ), color=:black)
 end 
-for p in xs[end-1:end]
+for p in xs[end-4:end]
     xlabel!(p, L"\log \phi")
 end
-xs = [xs[1:end-2] ; plot(framestyle=:none) ; xs[end-1:end]]
-plot(xs..., size=(700,550))
+#xs = [xs[1:end-2] ; plot(framestyle=:none) ; xs[end-1:end]]
+xs = [xs ; plot(framestyle=:none) ]
+plot(xs..., size=(800,350), layout=(3,5))
 
 savefig("docs/img/chiari-phi.pdf")
 

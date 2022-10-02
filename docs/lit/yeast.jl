@@ -99,12 +99,27 @@ end |> xs->plot(xs...)
 # appears.
 data3 = Locus.(mbdata,  Ref(spmap), prior=BetaSplitTree(-1.5, ntaxa), α=1e-6, 
                rooted=false)
-Sprior = CCD(SplitCounts(root), BetaSplitTree(-1.99, ntaxa))
+Sprior = CCD(SplitCounts(root), BetaSplitTree(-1.5, ntaxa))
 ϕprior = BranchModel(root, [0., -0.5])
 model  = MSCModel(Sprior, ϕprior)
 alg3   = EPABCIS(data3, model, 50000, target=200, miness=10., λ=0.1, α=1e-4, c=0.95)
 trace3 = ep!(alg3, 2)
 
+t1 = maptree(alg4.model, spmap)
+p1 = plot(t1, transform=true, scalebar=10., right_margin=10Plots.mm)
+
+# using an informative prior does work
+splitdict = Dict{UInt8, Dict{UInt8, Int64}}()
+c1 = getclade(spmap, ["Calb"])
+splitdict[root] = Dict(min(c1, root-c1)=>1)
+X = SplitCounts(splitdict, root)
+Sprior = CCD(X, BetaSplitTree(-1.5, ntaxa), 0.1) 
+randtree(Sprior, spmap, 10000) |> ranking
+
+ϕprior = BranchModel(root, [0., -0.5])
+model  = MSCModel(Sprior, ϕprior)
+alg4   = EPABCIS(data3, model, 50000, target=200, miness=10., λ=0.1, α=1e-4, c=0.95)
+trace3 = ep!(alg4, 2)
 
 # SIS
 # ===
